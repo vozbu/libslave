@@ -260,6 +260,21 @@ public:
     const char* unpack(const char *from);
 };
 
+class Field_bit : public Field
+{
+    unsigned int _pack_length;
+
+public:
+    Field_bit(const std::string& field_name_arg, const std::string& type);
+
+    const char* unpack(const char *from);
+
+    unsigned int pack_length() const {
+        return _pack_length;
+    }
+};
+
+
 }
 
 #endif

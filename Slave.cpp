@@ -260,6 +260,9 @@ void Slave::createTable(RelayLogInfo& rli,
         else if (extract_field == "decimal")
             field = PtrField(new Field_decimal(name, type));
 
+        else if (extract_field == "bit")
+            field = PtrField(new Field_bit(name, type));
+
         else {
             LOG_ERROR(log, "createTable: class name don't exist: " << extract_field );
             throw std::runtime_error("class name does not exist: " + extract_field);

@@ -219,7 +219,8 @@ namespace
         MYSQL_VARCHAR,
         MYSQL_TINYTEXT,
         MYSQL_TEXT,
-        MYSQL_DECIMAL
+        MYSQL_DECIMAL,
+        MYSQL_BIT
     };
 
     template <MYSQL_TYPE T>
@@ -280,7 +281,15 @@ namespace
         static const std::string name;
     };
     const std::string MYSQL_type_traits<MYSQL_DECIMAL>::name = "DECIMAL";
-
+    
+    template <>
+    struct MYSQL_type_traits<MYSQL_BIT>
+    {
+        typedef unsigned long long slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_BIT>::name = "BIT";
+    
     template <typename T>
     bool not_equal(const T& a, const T& b)
     {
@@ -356,7 +365,8 @@ namespace
         boost::mpl::int_<MYSQL_VARCHAR>,
         boost::mpl::int_<MYSQL_TINYTEXT>,
         boost::mpl::int_<MYSQL_TEXT>,
-        boost::mpl::int_<MYSQL_DECIMAL>
+        boost::mpl::int_<MYSQL_DECIMAL>,
+        boost::mpl::int_<MYSQL_BIT>
     > mysql_one_field_types;
 
     BOOST_AUTO_TEST_CASE_TEMPLATE(test_OneField, T, mysql_one_field_types)

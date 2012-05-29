@@ -444,4 +444,41 @@ double Field_decimal::dec2double(const char* from)
     return v;
 }
 
+
+Field_bit::Field_bit(const std::string& field_name_arg, const std::string& type)
+    : Field(field_name_arg, type)
+{
+    std::string::size_type b = type.find('(', 0);
+    std::string::size_type e = type.find(')', 0);
+
+    if (b == std::string::npos || e == std::string::npos)
+        throw std::runtime_error("Field_bit: Incorrect field BIT");
+
+    LOG_TRACE(log, " Field_bit: arg " << field_name_arg << " type " << type);
+
+    std::string str_count(type, b+1, e-b-1);
+
+    _pack_length = (::atoi(str_count.c_str()) + 7) / 8;
+
+    if (0 == _pack_length || _pack_length > 8 )
+        throw std::runtime_error("Field_bit: incorrect data length");
+}
+
+const char* Field_bit::unpack(const char *from)
+{
+    uint64 value = 0ULL;
+    
+    for (const char *b = from, *e = from + _pack_length; b < e; ++b)
+    {
+        value <<= 8;
+        value |= *(const uint8*)b;
+    }
+
+    LOG_TRACE(log, "  bit: 0x" << std::hex << value);
+
+    field_data = value;
+
+    return from + _pack_length;
+}
+
 } // namespace slave
