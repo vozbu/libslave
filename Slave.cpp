@@ -322,11 +322,11 @@ struct raii_mysql_connector
          */
         mysql_options(mysql, MYSQL_OPT_READ_TIMEOUT, &timeout); //(const char*) slave_net_timeout.c_str());
 
-        bool was_error = false;
+        bool was_error = reconnect;
         while (mysql_real_connect(mysql,
                                   m_master_info.host.c_str(),
                                   m_master_info.user.c_str(),
-                                  m_master_info.password.c_str(), 0, m_master_info.port, 0, 0)
+                                  m_master_info.password.c_str(), 0, m_master_info.port, 0, CLIENT_REMEMBER_OPTIONS)
                == 0) {
 
 
