@@ -233,80 +233,238 @@ namespace
             stopSlave();
         }
 
-        template <typename T>
-        struct CheckEquality
+        template<typename T>
+        struct Collector
         {
-            T value;
-            Atomic<int> counter;
-            std::string fail_reason;
+            typedef slave::RecordSet::TypeEvent TypeEvent;
+            typedef boost::optional<T> Row;
+            typedef std::tuple<TypeEvent, Row, Row> Event;
+            typedef std::vector<Event> EventVector;
+            EventVector data;
 
-            CheckEquality(const T& t) : value(t), counter(0) {}
-
-            void operator() (const slave::RecordSet& rs)
+            static Row extract(const slave::Row& row)
             {
-                try
+                if (row.size() > 1)
                 {
-                    if (++counter > 1)
-                        throw std::runtime_error("Second call on CheckEquality");
-                    const slave::Row& row = rs.m_row;
-                    if (row.size() > 1)
-                    {
-                        std::ostringstream str;
-                        str << "Row size is " << row.size();
-                        throw std::runtime_error(str.str());
-                    }
-                    const slave::Row::const_iterator it = row.find("value");
-                    if (row.end() == it)
-                        throw std::runtime_error("Can't find field 'value' in the row");
-                    const T t = boost::any_cast<T>(it->second.second);
-                    //if (value != t)
-                    if (not_equal(value,t))
-                    {
-                        std::ostringstream str;
-                        str << "Value '" << value << "' is not equal to libslave value '" << t << "'";
-                        throw std::runtime_error(str.str());
-                    }
+                    std::ostringstream str;
+                    str << "Row size is " << row.size();
+                    throw std::runtime_error(str.str());
                 }
-                catch (const std::exception& ex)
+                const slave::Row::const_iterator it = row.find("value");
+                if (row.end() != it)
+                    return boost::any_cast<T>(it->second.second);
+                else
+                    return Row();
+            }
+
+            void operator()(const slave::RecordSet& rs)
+            {
+                data.emplace_back(std::make_tuple(rs.type_event, extract(rs.m_old_row), extract(rs.m_row)));
+            }
+
+            static void expectNothing(const Row& row, const std::string& name,
+                                      const std::string& aErrorMessage)
+            {
+                if (row)
+                    BOOST_ERROR("Has " << name << " image with '" << row.get()
+                                << "' value, expected nothing during" << aErrorMessage);
+            }
+
+            static void expectValue(const T& value, const Row& row, const std::string& name,
+                                    const std::string& aErrorMessage)
+            {
+                if (!row)
+                    BOOST_ERROR("Has not " << name << " image, expected '" << value << "' during" << aErrorMessage);
+                if (not_equal(row.get(), value))
+                    BOOST_ERROR("Has invalid " << name << " image with '" << row.get() << "'"
+                                << "while expected '"<< value << "' during " << aErrorMessage);
+            }
+
+            static void expectEventType(const TypeEvent& expected, const TypeEvent& value, const std::string& name,
+                                    const std::string& aErrorMessage)
+            {
+                if (not_equal(expected, value))
+                    BOOST_ERROR("Has invalid " << name << " image with '" << value << "'"
+                                << "while expected '"<< expected << "' during " << aErrorMessage);
+            }
+
+            void checkInsert(const T& t, const std::string& aErrorMessage) const
+            {
+                if (data.size() != 1)
+                    BOOST_ERROR ("Have invalid call count: " << data.size() << " for " << aErrorMessage);
+                const auto& tuple = data.front();
+                expectEventType(TypeEvent::Write, std::get<0>(tuple), "TYPE_EVENT", aErrorMessage);
+                expectNothing(std::get<1>(tuple), "BEFORE", aErrorMessage);
+                expectValue(t, std::get<2>(tuple), "AFTER", aErrorMessage);
+            }
+
+            void checkUpdate(const T& was, const T& now, const std::string& aErrorMessage) const
+            {
+                if (data.size() != 1)
+                    BOOST_ERROR ("Have invalid call count: " << data.size() << " for " << aErrorMessage);
+                const auto& tuple = data.front();
+                expectEventType(TypeEvent::Update, std::get<0>(tuple), "TYPE_EVENT", aErrorMessage);
+                expectValue(was, std::get<1>(tuple), "BEFORE", aErrorMessage);
+                expectValue(now, std::get<2>(tuple), "AFTER", aErrorMessage);
+            }
+
+            void checkDelete(const T& was, const std::string& aErrorMessage) const
+            {
+                if (data.size() != 1)
+                    BOOST_ERROR ("Have invalid call count: " << data.size() << " for " << aErrorMessage);
+                const auto& tuple = data.front();
+                expectEventType(TypeEvent::Delete, std::get<0>(tuple), "TYPE_EVENT", aErrorMessage);
+                expectValue(was, std::get<2>(tuple), "BEFORE", aErrorMessage);
+                expectNothing(std::get<1>(tuple), "AFTER", aErrorMessage);
+            }
+
+            void checkNothing(const std::string& aErrorMessage)
+            {
+                if (!data.empty())
+                    BOOST_ERROR ("Have invalid call count: " << data.size() << " for " << aErrorMessage);
+            }
+
+            bool waitCall(const std::string& aErrorMessage, const uint32_t aTimeoutSeconds) const
+            {
+                const timespec ts = {0 , 1000000};
+                size_t i = 0;
+                for (; i < 1000 * aTimeoutSeconds; ++i)
                 {
-                    fail_reason += '\n';
-                    fail_reason += ex.what();
+                    ::nanosleep(&ts, NULL);
+                    if (!data.empty())
+                        break;
                 }
+                if (data.empty())
+                    BOOST_ERROR ("Have no calls to libslave callback for 1 second: " << aErrorMessage);
             }
         };
 
-        template <typename T>
-        void checkInsertValue(T t, const std::string& aInsertString, const std::string& aErrorMsg)
+        template<typename T, typename F>
+        void check(F f, const std::string& aQuery, const std::string& aErrorMsg)
         {
             // Устанавливаем в libslave колбек для проверки этого значения
-            CheckEquality<T> sCallback(t);
+            Collector<T> sCallback;
             m_Callback.setCallback(std::ref(sCallback));
             // Проверяем, что не было нежелательных вызовов до этого
             if (0 != m_Callback.m_UnwantedCalls)
                 BOOST_ERROR("Unwanted calls before this case: " << m_Callback.m_UnwantedCalls << aErrorMsg);
 
-            // Всталяем значение в таблицу
-            const std::string sInsertValueQuery = "INSERT INTO test VALUES (" + aInsertString + ")";
-            conn->query(sInsertValueQuery);
+            // Модифицируем таблицу
+            conn->query(aQuery);
 
             // Ждем отработки колбека максимум 1 секунду
-            const timespec ts = {0 , 1000000};
-            size_t i = 0;
-            for (; i < 1000; ++i)
-            {
-                ::nanosleep(&ts, NULL);
-                if (sCallback.counter >= 1)
-                    break;
-            }
-            if (sCallback.counter < 1)
-                BOOST_ERROR ("Have no calls to libslave callback for 1 second: " << aErrorMsg);
+            sCallback.waitCall(aErrorMsg, 1);
+
+            f(sCallback);
 
             // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
             // строку он не мучал больше, пока мы ее проверяем
             m_Callback.setCallback();
+        }
 
-            if (!sCallback.fail_reason.empty())
-                BOOST_ERROR(sCallback.fail_reason << "\n" << aErrorMsg);
+        template<typename T>
+        struct Line
+        {
+            std::string type;
+            std::string filename;
+            std::string line;
+            size_t      lineNumber;
+            std::string insert;
+            T           expected;
+        };
+
+        template<typename T> static std::string errorMessage(const Line<T>& c)
+        {
+            return "(we are now on file '" + c.filename + "' line " + std::to_string(c.lineNumber) + ": '" + c.line + "')";
+        }
+
+        template <typename T>
+        void checkInsertValue(T t, const std::string& aValue, const std::string& aErrorMessage)
+        {
+            check<T>([&t, &aErrorMessage](const Collector<T>& collector)
+                     { collector.checkInsert(t, aErrorMessage); },
+                     "INSERT INTO test VALUES (" + aValue + ")", aErrorMessage);
+        }
+
+        template<typename T> void checkInsert(const Line<T>& line)
+        {
+            checkInsertValue<T>(line.expected, line.insert, errorMessage(line));
+        }
+
+        template<typename T>
+        void checkUpdate(Line<T> was, Line<T> now)
+        {
+            check<T>([&was, &now](const Collector<T>& collector)
+                     { collector.checkUpdate(was.expected, now.expected, errorMessage(now)); },
+                     "UPDATE test SET value=" + now.insert, errorMessage(now));
+        }
+
+        template <typename T>
+        void checkDeleteValue(T was, const std::string& aValue, const std::string& aErrorMessage)
+        {
+            check<T>([&was, &aErrorMessage](const Collector<T>& collector)
+                     { collector.checkDelete(was, aErrorMessage); },
+                     "DELETE FROM test", aErrorMessage);
+        }
+
+        template<typename T> void recreate(boost::shared_ptr<nanomysql::Connection>& conn,
+                                           const Line<T>& c)
+        {
+            const std::string sDropTableQuery = "DROP TABLE IF EXISTS test";
+            conn->query(sDropTableQuery);
+            const std::string sCreateTableQuery = "CREATE TABLE test (value " + c.type + ") DEFAULT CHARSET=utf8";
+            conn->query(sCreateTableQuery);
+        }
+
+        template<typename T> void testInsert(boost::shared_ptr<nanomysql::Connection>& conn,
+                                             const std::vector<Line<T>>& data)
+        {
+            for (const Line<T>& c : data)
+            {
+                recreate(conn, c);
+                checkInsertValue<T>(c.expected, c.insert, errorMessage(c));
+            }
+        }
+
+        template<typename T> void testUpdate(boost::shared_ptr<nanomysql::Connection>& conn,
+                                             const std::vector<Line<T>>& data)
+        {
+            for (std::size_t i = 0; i < data.size(); ++i)
+                if (i == 0)
+                {
+                    recreate(conn, data[0]);
+                    checkInsert<T>(data[0]);
+                }
+                else
+                {
+                    // стоит if, т.к. в противном случае callback не дернется
+                    if (data[i-1].expected != data[i].expected)
+                        checkUpdate<T>(data[i-1], data[i]);
+                }
+            if (data.back().expected != data.front().expected)
+                checkUpdate<T>(data.back(), data.front());
+        }
+
+        template<typename T> void testDelete(boost::shared_ptr<nanomysql::Connection>& conn,
+                                             const std::vector<Line<T>>& data)
+        {
+            for (const Line<T>& c : data)
+            {
+                recreate(conn, c);
+                checkInsertValue<T>(c.expected, c.insert, errorMessage(c));
+
+                checkDeleteValue<T>(c.expected, c.insert, errorMessage(c));
+            }
+        }
+
+        template<typename T> void testAll(boost::shared_ptr<nanomysql::Connection>& conn,
+                                          const std::vector<Line<T>>& data)
+        {
+            if (data.empty())
+                return;
+            testInsert(conn, data);
+            testUpdate(conn, data);
+            testDelete(conn, data);
         }
     };
 
@@ -447,6 +605,8 @@ namespace
         BOOST_REQUIRE_MESSAGE(f, "Cannot open file with data: '" << sDataFilename << "'");
         std::string line;
         size_t line_num = 0;
+        std::vector<Line<slave_type>> data;
+        std::string type;
         while (getline(f, line))
         {
             ++line_num;
@@ -472,10 +632,9 @@ namespace
                 }
                 if (tokens.size() != 2)
                     BOOST_FAIL("Malformed string '" << line << "' in the file '" << sDataFilename << "'");
-                const std::string sDropTableQuery = "DROP TABLE IF EXISTS test";
-                conn->query(sDropTableQuery);
-                const std::string sCreateTableQuery = "CREATE TABLE test (value " + tokens[1] + ") DEFAULT CHARSET=utf8";
-                conn->query(sCreateTableQuery);
+                type = tokens[1];
+                testAll(conn, data);
+                data.clear();
             }
             else if (tokens.front() == "data")
             {
@@ -486,13 +645,22 @@ namespace
                 slave_type checked_value;
                 getValue(tokens[2], checked_value);
 
-                checkInsertValue(checked_value, tokens[1], "(we are now on file '" + sDataFilename + "' line " + std::to_string(line_num) + ": '" + line + "')");
+                Line<slave_type> current;
+                current.type = type;
+                current.filename = sDataFilename;
+                current.line = line;
+                current.lineNumber = line_num;
+                current.insert = tokens[1];
+                current.expected = checked_value;
+                data.push_back(current);
             }
             else if (tokens.front()[0] == ';')
                 continue;   // комментарий
             else
                 BOOST_FAIL("Unknown command '" << tokens.front() << "' in the file '" << sDataFilename << "' on line " << line_num);
         }
+        testAll(conn, data);
+        data.clear();
     }
 
     // Проверяем, что если останавливаем слейв, он в дальнейшем продолжит читать с той же позиции
@@ -508,29 +676,18 @@ namespace
 
         conn->query("INSERT INTO test VALUES (345234)");
 
-        CheckEquality<uint32_t> sCallback(345234);
+        Collector<uint32_t> sCallback;
         m_Callback.setCallback(std::ref(sCallback));
 
         startSlave();
 
-        // Ждем отработки колбека максимум 1 секунду
-        const timespec ts = {0 , 1000000};
-        size_t i = 0;
-        for (; i < 1000; ++i)
-        {
-            ::nanosleep(&ts, NULL);
-            if (sCallback.counter >= 1)
-                break;
-        }
-        if (sCallback.counter < 1)
-            BOOST_ERROR ("Have no calls to libslave callback for 1 second");
+        auto sErrorMessage = "start/stop test";
+        sCallback.waitCall(sErrorMessage, 1);
+        sCallback.checkInsert(345234, sErrorMessage);
 
         // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
         // строку он не мучал больше, пока мы ее проверяем
         m_Callback.setCallback();
-
-        if (!sCallback.fail_reason.empty())
-            BOOST_ERROR(sCallback.fail_reason << "\n");
 
         // Проверяем, что не было нежелательных вызовов до этого
         if (0 != m_Callback.m_UnwantedCalls)
@@ -646,27 +803,17 @@ namespace
 
         conn->query("INSERT INTO test VALUES (345234)");
 
-        CheckEquality<uint32_t> sCallback(345234);
+        Collector<uint32_t> sCallback;
         m_Callback.setCallback(std::ref(sCallback));
 
         // Ждем отработки колбека максимум 2 секунды (потому что одну спит колбек перед реконнектом)
-        const timespec ts = {0 , 1000000};
-        size_t i = 0;
-        for (; i < 2000; ++i)
-        {
-            ::nanosleep(&ts, NULL);
-            if (sCallback.counter >= 1)
-                break;
-        }
-        if (sCallback.counter < 1)
-            BOOST_ERROR ("Have no calls to libslave callback for 2 seconds");
+        auto sErrorMessage = "disconnect test";
+        sCallback.waitCall(sErrorMessage, 2);
+        sCallback.checkInsert(345234, sErrorMessage);
 
         // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
         // строку он не мучал больше, пока мы ее проверяем
         m_Callback.setCallback();
-
-        if (!sCallback.fail_reason.empty())
-            BOOST_ERROR(sCallback.fail_reason << "\n");
 
         // Проверяем, что не было нежелательных вызовов до этого
         if (0 != m_Callback.m_UnwantedCalls)
