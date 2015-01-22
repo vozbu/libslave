@@ -429,8 +429,6 @@ unsigned char* do_update_row(boost::shared_ptr<slave::Table> table,
 
 
 void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, const Row_event_info& roi, ExtStateIface &ext_state) {
-
-
     std::pair<std::string,std::string> key = rli.getTableNameById(roi.m_table_id);
 
     LOG_DEBUG(log, "applyRowEvent(): " << roi.m_table_id << " " << key.first << "." << key.second);

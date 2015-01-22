@@ -89,8 +89,9 @@ public:
 
     void setCallback(const std::string& _db_name, const std::string& _tbl_name, callback _callback)
     {
-        m_table_order.push_back(std::make_pair(_db_name, _tbl_name));
-        m_callbacks[std::make_pair(_db_name, _tbl_name)] = _callback;
+        const std::pair<std::string, std::string> key = std::make_pair(_db_name, _tbl_name);
+        m_table_order.push_back(key);
+        m_callbacks[key] = _callback;
 
         ext_state.initTableCount(_db_name + "." + _tbl_name);
     }
