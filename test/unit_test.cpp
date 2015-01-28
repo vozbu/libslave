@@ -1,8 +1,4 @@
-#define BOOST_TEST_MODULE libslave
-#define BOOST_TEST_DYN_LINK
-#include <boost/test/unit_test.hpp>
-
-using namespace boost;
+#include <boost/test/included/unit_test.hpp>
 using namespace boost::unit_test;
 
 #include <boost/algorithm/string/classification.hpp>
@@ -12,11 +8,13 @@ using namespace boost::unit_test;
 #include <boost/thread.hpp>
 #include <fstream>
 #include <cfloat>
+#include <mutex>
+#include <condition_variable>
 #include "Slave.h"
 #include "nanomysql.h"
 #include "types.h"
 
-namespace
+namespace // anonymous
 {
     const std::string TestDataDir = "test/data/";
 
@@ -112,7 +110,49 @@ namespace
 
     struct Fixture
     {
+        struct TestExtState : public slave::ExtStateIface
+        {
+            std::mutex m_Mutex;
+            std::condition_variable m_CondVariable;
+
+            TestExtState() : master_log_pos(0), intransaction_pos(0) {}
+
+            virtual slave::State getState() { return slave::State(); }
+            virtual void setConnecting() {}
+            virtual time_t getConnectTime() { return 0; }
+            virtual void setLastFilteredUpdateTime() {}
+            virtual time_t getLastFilteredUpdateTime() { return 0; }
+            virtual void setLastEventTimePos(time_t t, unsigned long pos) { intransaction_pos = pos; }
+            virtual time_t getLastUpdateTime() { return 0; }
+            virtual time_t getLastEventTime() { return 0; }
+            virtual unsigned long getIntransactionPos() { return intransaction_pos; }
+            virtual void setMasterLogNamePos(const std::string& log_name, unsigned long pos)
+            {
+                {
+                    std::lock_guard<std::mutex> lock(m_Mutex);
+                    master_log_name = log_name;
+                    master_log_pos = intransaction_pos = pos;
+                }
+                m_CondVariable.notify_one();
+            }
+            virtual unsigned long getMasterLogPos() { return master_log_pos; }
+            virtual std::string getMasterLogName() { return master_log_name; }
+            virtual void saveMasterInfo() {}
+            virtual bool loadMasterInfo(std::string& logname, unsigned long& pos) { logname.clear(); pos = 0; return false; }
+            virtual unsigned int getConnectCount() { return 0; }
+            virtual void setStateProcessing(bool _state) {}
+            virtual bool getStateProcessing() { return false; }
+            virtual void initTableCount(const std::string& t) {}
+            virtual void incTableCount(const std::string& t) {}
+
+        private:
+            std::string     master_log_name;
+            unsigned long   master_log_pos;
+            unsigned long   intransaction_pos;
+        };
+
         config cfg;
+        TestExtState m_ExtState;
         slave::Slave m_Slave;
         boost::shared_ptr<nanomysql::Connection> conn;
 
@@ -174,6 +214,7 @@ namespace
         };
 
         Callback m_Callback;
+        slave::EventKind m_Filter;
 
         void startSlave()
         {
@@ -198,7 +239,7 @@ namespace
                 BOOST_FAIL ("Can't connect to mysql via libslave in 1 second");
         }
 
-        Fixture()
+        Fixture(slave::EventKind filter = slave::eAll) : m_Slave(m_ExtState), m_Filter(filter)
         {
             cfg.load(TestDataDir + "mysql.conf");
 
@@ -215,7 +256,7 @@ namespace
 
             m_Slave.setMasterInfo(sMasterInfo);
             // Ставим колбек из фиксчи - а он будет вызывать колбеки, которые ему будут ставить в тестах
-            m_Slave.setCallback(cfg.mysql_db, "test", boost::ref(m_Callback));
+            m_Slave.setCallback(cfg.mysql_db, "test", boost::ref(m_Callback), filter);
             m_Slave.init();
             startSlave();
         }
@@ -281,7 +322,7 @@ namespace
             }
 
             static void expectEventType(const TypeEvent& expected, const TypeEvent& value, const std::string& name,
-                                    const std::string& aErrorMessage)
+                                        const std::string& aErrorMessage)
             {
                 if (not_equal(expected, value))
                     BOOST_ERROR("Has invalid " << name << " image with '" << value << "'"
@@ -323,24 +364,40 @@ namespace
                 if (!data.empty())
                     BOOST_ERROR ("Have invalid call count: " << data.size() << " for " << aErrorMessage);
             }
-
-            bool waitCall(const std::string& aErrorMessage, const uint32_t aTimeoutSeconds) const
-            {
-                const timespec ts = {0 , 1000000};
-                size_t i = 0;
-                for (; i < 1000 * aTimeoutSeconds; ++i)
-                {
-                    ::nanosleep(&ts, NULL);
-                    if (!data.empty())
-                        break;
-                }
-                if (data.empty())
-                    BOOST_ERROR ("Have no calls to libslave callback for 1 second: " << aErrorMessage);
-            }
         };
 
+        template<typename T>
+        bool waitCall(const Collector<T>& aCallback)
+        {
+            std::string   log_name;
+            unsigned long log_pos;
+            conn->query("SHOW MASTER STATUS");
+            conn->use([&log_name, &log_pos](const nanomysql::fields_t& row)
+            {
+                log_name = row.at("File").data;
+                log_pos = std::stoul(row.at("Position").data);
+            });
+
+            std::unique_lock<std::mutex> lock(m_ExtState.m_Mutex);
+            if (!m_ExtState.m_CondVariable.wait_for(lock, std::chrono::milliseconds(2000), [this, &log_name, &log_pos]
+            {
+                return log_name == m_ExtState.getMasterLogName() && \
+                       log_pos  == m_ExtState.getMasterLogPos();
+            }))
+                BOOST_ERROR("Condition variable timed out");
+
+            if (aCallback.data.empty())
+                return false;
+            return true;
+        }
+
+        bool shouldProcess(slave::EventKind filter, slave::EventKind sort)
+        {
+            return (filter & sort) == sort;
+        }
+
         template<typename T, typename F>
-        void check(F f, const std::string& aQuery, const std::string& aErrorMsg)
+        void check(F f, const std::string& aQuery, const std::string& aErrorMsg, slave::EventKind sort)
         {
             // Устанавливаем в libslave колбек для проверки этого значения
             Collector<T> sCallback;
@@ -352,10 +409,18 @@ namespace
             // Модифицируем таблицу
             conn->query(aQuery);
 
-            // Ждем отработки колбека максимум 1 секунду
-            sCallback.waitCall(aErrorMsg, 1);
-
-            f(sCallback);
+            if (waitCall(sCallback))
+            {
+                if (shouldProcess(m_Filter, sort))
+                    f(sCallback);
+                else
+                    BOOST_ERROR("Have unfiltered calls to libslave callback");
+            }
+            else
+            {
+                if (shouldProcess(m_Filter, sort))
+                    BOOST_ERROR("Have no calls to libslave callback");
+            }
 
             // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
             // строку он не мучал больше, пока мы ее проверяем
@@ -383,7 +448,7 @@ namespace
         {
             check<T>([&t, &aErrorMessage](const Collector<T>& collector)
                      { collector.checkInsert(t, aErrorMessage); },
-                     "INSERT INTO test VALUES (" + aValue + ")", aErrorMessage);
+                     "INSERT INTO test VALUES (" + aValue + ")", aErrorMessage, slave::eInsert);
         }
 
         template<typename T> void checkInsert(const Line<T>& line)
@@ -396,7 +461,7 @@ namespace
         {
             check<T>([&was, &now](const Collector<T>& collector)
                      { collector.checkUpdate(was.expected, now.expected, errorMessage(now)); },
-                     "UPDATE test SET value=" + now.insert, errorMessage(now));
+                     "UPDATE test SET value=" + now.insert, errorMessage(now), slave::eUpdate);
         }
 
         template <typename T>
@@ -404,7 +469,7 @@ namespace
         {
             check<T>([&was, &aErrorMessage](const Collector<T>& collector)
                      { collector.checkDelete(was, aErrorMessage); },
-                     "DELETE FROM test", aErrorMessage);
+                     "DELETE FROM test", aErrorMessage, slave::eDelete);
         }
 
         template<typename T> void recreate(boost::shared_ptr<nanomysql::Connection>& conn,
@@ -468,16 +533,172 @@ namespace
         }
     };
 
-    BOOST_AUTO_TEST_SUITE(SlaveConf)
 
-    BOOST_AUTO_TEST_CASE(test_HelloWorld)
+    void test_HelloWorld()
     {
         std::cout << "You probably should specify parameters to mysql in the file " << TestDataDir << "mysql.conf first" << std::endl;
     }
 
-    BOOST_AUTO_TEST_SUITE_END()
+    // Проверяем, что если останавливаем слейв, он в дальнейшем продолжит читать с той же позиции
+    void test_StartStopPosition()
+    {
+        Fixture f;
+        // Создаем нужную таблицу
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
 
-    BOOST_FIXTURE_TEST_SUITE(Slave, Fixture)
+        f.checkInsertValue(uint32_t(12321), "12321", "");
+
+        f.stopSlave();
+
+        f.conn->query("INSERT INTO test VALUES (345234)");
+
+        Fixture::Collector<uint32_t> sCallback;
+        f.m_Callback.setCallback(std::ref(sCallback));
+
+        f.startSlave();
+
+        auto sErrorMessage = "start/stop test";
+        if (!f.waitCall(sCallback))
+            BOOST_ERROR("Have no calls to libslave callback for " << sErrorMessage);
+        sCallback.checkInsert(345234, sErrorMessage);
+
+        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
+        // строку он не мучал больше, пока мы ее проверяем
+        f.m_Callback.setCallback();
+
+        // Проверяем, что не было нежелательных вызовов до этого
+        if (0 != f.m_Callback.m_UnwantedCalls)
+            BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
+    }
+
+    struct CheckBinlogPos
+    {
+        const slave::Slave& m_Slave;
+        slave::Slave::binlog_pos_t m_LastPos;
+
+        CheckBinlogPos(const slave::Slave& aSlave, const slave::Slave::binlog_pos_t& aLastPos)
+        :   m_Slave(aSlave), m_LastPos(aLastPos)
+        {}
+
+        bool operator() () const
+        {
+            const slave::MasterInfo& sMasterInfo = m_Slave.masterInfo();
+            if (sMasterInfo.master_log_name > m_LastPos.first
+            || (sMasterInfo.master_log_name == m_LastPos.first
+                && sMasterInfo.master_log_pos >= m_LastPos.second))
+                return true;
+            return false;
+        }
+    };
+
+    struct CallbackCounter
+    {
+        Atomic<int> counter;
+        std::string fail;
+
+        CallbackCounter() : counter(0) {}
+
+        void operator() (const slave::RecordSet& rs)
+        {
+            if (++counter > 2)
+                fail = std::to_string(counter) + " calls on CallbackCounter";
+        }
+    };
+
+    // Проверяем, работает ли ручное выставление позиции бинлога
+    void test_SetBinlogPos()
+    {
+        Fixture f;
+        // Создаем нужную таблицу
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+
+        f.checkInsertValue(uint32_t(12321), "12321", "");
+
+        // Запоминаем позицию
+        const slave::Slave::binlog_pos_t sInitialBinlogPos = f.m_Slave.getLastBinlog();
+
+        // Вставляем значение, читаем его
+        f.checkInsertValue(uint32_t(12322), "12322", "");
+
+        f.stopSlave();
+
+        // Вставляем новое значение
+        f.conn->query("INSERT INTO test VALUES (345234)");
+
+        // И получаем новую позицию
+        const slave::Slave::binlog_pos_t sCurBinlogPos = f.m_Slave.getLastBinlog();
+        BOOST_CHECK_NE(sCurBinlogPos.second, sInitialBinlogPos.second);
+
+        // Теперь выставляем в слейв старую позицию и проверяем, что 2 INSERTа прочтутся (12322 и 345234)
+        slave::MasterInfo sMasterInfo = f.m_Slave.masterInfo();
+        sMasterInfo.master_log_name = sInitialBinlogPos.first;
+        sMasterInfo.master_log_pos = sInitialBinlogPos.second;
+        f.m_Slave.setMasterInfo(sMasterInfo);
+
+        CallbackCounter sCallback;
+        f.m_Callback.setCallback(std::ref(sCallback));
+        if (0 != f.m_Callback.m_UnwantedCalls)
+        {
+            BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
+        }
+
+        f.m_SlaveThread = boost::thread([&f, sCurBinlogPos] () { f.m_Slave.get_remote_binlog(CheckBinlogPos(f.m_Slave, sCurBinlogPos)); });
+
+        // Ждем отработки колбека максимум 1 секунду
+        const timespec ts = {0 , 1000000};
+        size_t i = 0;
+        for (; i < 1000; ++i)
+        {
+            ::nanosleep(&ts, NULL);
+            if (sCallback.counter >= 2)
+                break;
+        }
+        if (sCallback.counter < 2)
+            BOOST_ERROR ("Have less than two calls to libslave callback for 1 second");
+
+        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
+        // строку он не мучал больше, пока мы ее проверяем
+        f.m_Callback.setCallback();
+
+        if (!sCallback.fail.empty())
+            BOOST_ERROR(sCallback.fail);
+
+        BOOST_CHECK_MESSAGE (f.m_SlaveThread.joinable(), "m_Slave.get_remote_binlog is not finished yet and will be never!");
+    }
+
+    // Проверяем, что если соединение с базой рвется (без выхода из get_remote_binlog), то начинаем читать оттуда, где остановились
+    void test_Disconnect()
+    {
+        Fixture f;
+        // Создаем нужную таблицу
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+
+        f.checkInsertValue(uint32_t(12321), "12321", "");
+
+        f.m_StopFlag.m_SleepFlag = true;
+        f.m_Slave.close_connection();
+
+        f.conn->query("INSERT INTO test VALUES (345234)");
+
+        Fixture::Collector<uint32_t> sCallback;
+        f.m_Callback.setCallback(std::ref(sCallback));
+
+        auto sErrorMessage = "disconnect test";
+        if (!f.waitCall(sCallback))
+            BOOST_ERROR("Have no calls to libslave callback for " << sErrorMessage);
+        sCallback.checkInsert(345234, sErrorMessage);
+
+        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
+        // строку он не мучал больше, пока мы ее проверяем
+        f.m_Callback.setCallback();
+
+        // Проверяем, что не было нежелательных вызовов до этого
+        if (0 != f.m_Callback.m_UnwantedCalls)
+            BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
+    }
 
     enum MYSQL_TYPE
     {
@@ -583,19 +804,8 @@ namespace
         t.erase(0, 1);
     }
 
-    typedef boost::mpl::list<
-        boost::mpl::int_<MYSQL_INT>,
-        boost::mpl::int_<MYSQL_BIGINT>,
-        boost::mpl::int_<MYSQL_CHAR>,
-        boost::mpl::int_<MYSQL_VARCHAR>,
-        boost::mpl::int_<MYSQL_TINYTEXT>,
-        boost::mpl::int_<MYSQL_TEXT>,
-        boost::mpl::int_<MYSQL_DECIMAL>,
-        boost::mpl::int_<MYSQL_BIT>,
-        boost::mpl::int_<MYSQL_SET>
-    > mysql_one_field_types;
-
-    BOOST_AUTO_TEST_CASE_TEMPLATE(test_OneField, T, mysql_one_field_types)
+    template<typename T>
+    void testOneType(Fixture& fixture)
     {
         typedef MYSQL_type_traits<MYSQL_TYPE(T::value)> type_traits;
         typedef typename type_traits::slave_type slave_type;
@@ -605,7 +815,7 @@ namespace
         BOOST_REQUIRE_MESSAGE(f, "Cannot open file with data: '" << sDataFilename << "'");
         std::string line;
         size_t line_num = 0;
-        std::vector<Line<slave_type>> data;
+        std::vector<Fixture::Line<slave_type>> data;
         std::string type;
         while (getline(f, line))
         {
@@ -633,7 +843,7 @@ namespace
                 if (tokens.size() != 2)
                     BOOST_FAIL("Malformed string '" << line << "' in the file '" << sDataFilename << "'");
                 type = tokens[1];
-                testAll(conn, data);
+                fixture.testAll(fixture.conn, data);
                 data.clear();
             }
             else if (tokens.front() == "data")
@@ -645,7 +855,7 @@ namespace
                 slave_type checked_value;
                 getValue(tokens[2], checked_value);
 
-                Line<slave_type> current;
+                Fixture::Line<slave_type> current;
                 current.type = type;
                 current.filename = sDataFilename;
                 current.line = line;
@@ -655,170 +865,61 @@ namespace
                 data.push_back(current);
             }
             else if (tokens.front()[0] == ';')
-                continue;   // комментарий
+                continue;
             else
                 BOOST_FAIL("Unknown command '" << tokens.front() << "' in the file '" << sDataFilename << "' on line " << line_num);
         }
-        testAll(conn, data);
+        fixture.testAll(fixture.conn, data);
         data.clear();
     }
 
-    // Проверяем, что если останавливаем слейв, он в дальнейшем продолжит читать с той же позиции
-    BOOST_AUTO_TEST_CASE(test_StartStopPosition)
+    void testOneFilter(slave::EventKind filter)
     {
-        // Создаем нужную таблицу
-        conn->query("DROP TABLE IF EXISTS test");
-        conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
-
-        checkInsertValue(uint32_t(12321), "12321", "");
-
-        stopSlave();
-
-        conn->query("INSERT INTO test VALUES (345234)");
-
-        Collector<uint32_t> sCallback;
-        m_Callback.setCallback(std::ref(sCallback));
-
-        startSlave();
-
-        auto sErrorMessage = "start/stop test";
-        sCallback.waitCall(sErrorMessage, 1);
-        sCallback.checkInsert(345234, sErrorMessage);
-
-        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-        // строку он не мучал больше, пока мы ее проверяем
-        m_Callback.setCallback();
-
-        // Проверяем, что не было нежелательных вызовов до этого
-        if (0 != m_Callback.m_UnwantedCalls)
-            BOOST_ERROR("Unwanted calls before this case: " << m_Callback.m_UnwantedCalls);
+        Fixture f(filter);
+        testOneType<boost::mpl::int_<MYSQL_INT>>(f);
     }
 
-    struct CheckBinlogPos
+    void testOneFilterAllTypes(slave::EventKind filter)
     {
-        const slave::Slave& m_Slave;
-        slave::Slave::binlog_pos_t m_LastPos;
-
-        CheckBinlogPos(const slave::Slave& aSlave, const slave::Slave::binlog_pos_t& aLastPos)
-        :   m_Slave(aSlave), m_LastPos(aLastPos)
-        {}
-
-        bool operator() () const
-        {
-            const slave::MasterInfo& sMasterInfo = m_Slave.masterInfo();
-            if (sMasterInfo.master_log_name > m_LastPos.first
-            || (sMasterInfo.master_log_name == m_LastPos.first
-                && sMasterInfo.master_log_pos >= m_LastPos.second))
-                return true;
-            return false;
-        }
-    };
-
-    struct CallbackCounter
-    {
-        Atomic<int> counter;
-        std::string fail;
-
-        CallbackCounter() : counter(0) {}
-
-        void operator() (const slave::RecordSet& rs)
-        {
-            if (++counter > 2)
-                fail = std::to_string(counter) + " calls on CallbackCounter";
-        }
-    };
-
-    // Проверяем, работает ли ручное выставление позиции бинлога
-    BOOST_AUTO_TEST_CASE(test_SetBinlogPos)
-    {
-        // Создаем нужную таблицу
-        conn->query("DROP TABLE IF EXISTS test");
-        conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
-
-        checkInsertValue(uint32_t(12321), "12321", "");
-
-        // Запоминаем позицию
-        const slave::Slave::binlog_pos_t sInitialBinlogPos = m_Slave.getLastBinlog();
-
-        // Вставляем значение, читаем его
-        checkInsertValue(uint32_t(12322), "12322", "");
-
-        stopSlave();
-
-        // Вставляем новое значение
-        conn->query("INSERT INTO test VALUES (345234)");
-
-        // И получаем новую позицию
-        const slave::Slave::binlog_pos_t sCurBinlogPos = m_Slave.getLastBinlog();
-        BOOST_CHECK_NE(sCurBinlogPos.second, sInitialBinlogPos.second);
-
-        // Теперь выставляем в слейв старую позицию и проверяем, что 2 INSERTа прочтутся (12322 и 345234)
-        slave::MasterInfo sMasterInfo = m_Slave.masterInfo();
-        sMasterInfo.master_log_name = sInitialBinlogPos.first;
-        sMasterInfo.master_log_pos = sInitialBinlogPos.second;
-        m_Slave.setMasterInfo(sMasterInfo);
-
-        CallbackCounter sCallback;
-        m_Callback.setCallback(std::ref(sCallback));
-        if (0 != m_Callback.m_UnwantedCalls)
-        {
-            BOOST_ERROR("Unwanted calls before this case: " << m_Callback.m_UnwantedCalls);
-        }
-
-        m_SlaveThread = boost::thread([this, sCurBinlogPos] () { m_Slave.get_remote_binlog(CheckBinlogPos(m_Slave, sCurBinlogPos)); });
-
-        // Ждем отработки колбека максимум 1 секунду
-        const timespec ts = {0 , 1000000};
-        size_t i = 0;
-        for (; i < 1000; ++i)
-        {
-            ::nanosleep(&ts, NULL);
-            if (sCallback.counter >= 2)
-                break;
-        }
-        if (sCallback.counter < 2)
-            BOOST_ERROR ("Have less than two calls to libslave callback for 1 second");
-
-        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-        // строку он не мучал больше, пока мы ее проверяем
-        m_Callback.setCallback();
-
-        if (!sCallback.fail.empty())
-            BOOST_ERROR(sCallback.fail);
-
-        BOOST_CHECK_MESSAGE (m_SlaveThread.joinable(), "m_Slave.get_remote_binlog is not finished yet and will be never!");
+        Fixture f(filter);
+        testOneType<boost::mpl::int_<MYSQL_INT>>(f);
+        testOneType<boost::mpl::int_<MYSQL_BIGINT>>(f);
+        testOneType<boost::mpl::int_<MYSQL_CHAR>>(f);
+        testOneType<boost::mpl::int_<MYSQL_VARCHAR>>(f);
+        testOneType<boost::mpl::int_<MYSQL_TINYTEXT>>(f);
+        testOneType<boost::mpl::int_<MYSQL_TEXT>>(f);
+        testOneType<boost::mpl::int_<MYSQL_DECIMAL>>(f);
+        testOneType<boost::mpl::int_<MYSQL_BIT>>(f);
+        testOneType<boost::mpl::int_<MYSQL_SET>>(f);
     }
-
-    // Проверяем, что если соединение с базой рвется (без выхода из get_remote_binlog), то начинаем читать оттуда, где остановились
-    BOOST_AUTO_TEST_CASE(test_Disconnect)
-    {
-        // Создаем нужную таблицу
-        conn->query("DROP TABLE IF EXISTS test");
-        conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
-
-        checkInsertValue(uint32_t(12321), "12321", "");
-
-        m_StopFlag.m_SleepFlag = true;
-        m_Slave.close_connection();
-
-        conn->query("INSERT INTO test VALUES (345234)");
-
-        Collector<uint32_t> sCallback;
-        m_Callback.setCallback(std::ref(sCallback));
-
-        // Ждем отработки колбека максимум 2 секунды (потому что одну спит колбек перед реконнектом)
-        auto sErrorMessage = "disconnect test";
-        sCallback.waitCall(sErrorMessage, 2);
-        sCallback.checkInsert(345234, sErrorMessage);
-
-        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-        // строку он не мучал больше, пока мы ее проверяем
-        m_Callback.setCallback();
-
-        // Проверяем, что не было нежелательных вызовов до этого
-        if (0 != m_Callback.m_UnwantedCalls)
-            BOOST_ERROR("Unwanted calls before this case: " << m_Callback.m_UnwantedCalls);
-    }
-
-    BOOST_AUTO_TEST_SUITE_END()
 }// anonymous-namespace
+
+test_suite* init_unit_test_suite(int argc, char* argv[])
+{
+#define ADD_FIXTURE_TEST(testFunction) \
+    framework::master_test_suite().add(BOOST_TEST_CASE([&]() { testFunction(); }))
+
+    ADD_FIXTURE_TEST(test_HelloWorld);
+    ADD_FIXTURE_TEST(test_StartStopPosition);
+    ADD_FIXTURE_TEST(test_SetBinlogPos);
+    ADD_FIXTURE_TEST(test_Disconnect);
+
+#undef ADD_FIXTURE_TEST
+
+    framework::master_test_suite().add(BOOST_TEST_CASE([&]() { testOneFilterAllTypes(slave::eAll); }));
+
+#define ADD_FILTER_TEST(filter) \
+    framework::master_test_suite().add(BOOST_TEST_CASE([&]() { testOneFilter(filter); }))
+
+    ADD_FILTER_TEST(slave::eInsert);
+    ADD_FILTER_TEST(slave::eUpdate);
+    ADD_FILTER_TEST(slave::eDelete);
+    ADD_FILTER_TEST(slave::eNone);
+    ADD_FILTER_TEST(static_cast<slave::EventKind>(~static_cast<uint8_t>(slave::eInsert)));
+    ADD_FILTER_TEST(static_cast<slave::EventKind>(~static_cast<uint8_t>(slave::eUpdate)));
+    ADD_FILTER_TEST(static_cast<slave::EventKind>(~static_cast<uint8_t>(slave::eDelete)));
+
+#undef ADD_FILTER_TEST
+
+    return 0;
+}

@@ -427,10 +427,23 @@ unsigned char* do_update_row(boost::shared_ptr<slave::Table> table,
     return t;
 }
 
+namespace // anonymous
+{
+    inline EventKind eventKind(Log_event_type type)
+    {
+        switch(type)
+        {
+        case WRITE_ROWS_EVENT: return eInsert;
+        case UPDATE_ROWS_EVENT: return eUpdate;
+        case DELETE_ROWS_EVENT: return eDelete;
+        default: throw std::logic_error("is not processable kind");
+        }
+    }
+} // namespace anonymous
+
 
 void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, const Row_event_info& roi, ExtStateIface &ext_state) {
-
-
+    EventKind kind = eventKind(bei.type);
     std::pair<std::string,std::string> key = rli.getTableNameById(roi.m_table_id);
 
     LOG_DEBUG(log, "applyRowEvent(): " << roi.m_table_id << " " << key.first << "." << key.second);
@@ -444,15 +457,17 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
 
         unsigned char* row_start = roi.m_rows_buf;
 
-        while (row_start < roi.m_rows_end &&
-               row_start != NULL) {
+        if (should_process(table->m_filter, kind)) {
+            while (row_start < roi.m_rows_end &&
+                   row_start != NULL) {
 
-            if (bei.type == UPDATE_ROWS_EVENT) {
+                if (bei.type == UPDATE_ROWS_EVENT) {
 
-                row_start = do_update_row(table, bei, roi, row_start, ext_state);
+                    row_start = do_update_row(table, bei, roi, row_start, ext_state);
 
-            } else {
-                row_start = do_writedelete_row(table, bei, roi, row_start, ext_state);
+                } else {
+                    row_start = do_writedelete_row(table, bei, roi, row_start, ext_state);
+                }
             }
         }
     }
