@@ -34,6 +34,24 @@ namespace slave
 typedef boost::shared_ptr<Field> PtrField;
 typedef boost::function<void (RecordSet&)> callback;
 
+enum EventKind
+{
+    eNone = 0,
+    eInsert = (1 << 0),
+    eUpdate = (1 << 1),
+    eDelete = (1 << 2),
+    eAll = (1 << 0) | (1 << 1) | (1 << 2)
+};
+typedef EventKind filter;
+typedef EventKind EventKindList[3];
+
+inline const EventKindList& eventKindList()
+{
+    static EventKindList result = {eInsert, eUpdate, eDelete};
+    return result;
+}
+
+inline bool should_process(EventKind filter, EventKind kind) { return (filter & kind) == kind; }
 
 class Table {
 
@@ -42,6 +60,7 @@ public:
     std::vector<PtrField> fields;
 
     callback m_callback;
+    EventKind m_filter;
 
     void call_callback(slave::RecordSet& _rs, ExtStateIface &ext_state) {
 
