@@ -452,7 +452,8 @@ connected:
 
             if (!slave::read_log_event((const char*) mysql.net.read_pos + 1,
                                        len - 1,
-                                       event)) {
+                                       event,
+                                       event_stat)) {
 
                 LOG_TRACE(log, "Skipping unknown event.");
                 continue;
@@ -800,6 +801,8 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
 
         m_rli.setTableName(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
 
+        if (event_stat)
+            event_stat->processTableMap(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
         break;
     }
 
@@ -813,7 +816,7 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
 
         Row_event_info roi(bei.buf, bei.event_len, (bei.type == UPDATE_ROWS_EVENT));
 
-        apply_row_event(m_rli, bei, roi, ext_state);
+        apply_row_event(m_rli, bei, roi, ext_state, event_stat);
 
         break;
     }

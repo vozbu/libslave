@@ -177,6 +177,51 @@ struct StateHolder {
         return *ext_state;
     }
 };
+
+enum EventKind
+{
+    eNone   = 0,
+    eInsert = (1 << 0),
+    eUpdate = (1 << 1),
+    eDelete = (1 << 2),
+    eAll    = (1 << 0) | (1 << 1) | (1 << 2)
+};
+
+typedef EventKind EventKindList[3];
+
+inline const EventKindList& eventKindList()
+{
+    static EventKindList result = {eInsert, eUpdate, eDelete};
+    return result;
+}
+
+// All stats calls are called independently.
+// E. g., processing UPDATE on a table, tick() + one of tickModifyIgnored/tickModifyDone/tickModifyFailed will be called.
+class EventStatIface
+{
+public:
+    virtual ~EventStatIface()     {}
+    // TABLE_MAP event.
+    virtual void processTableMap(const unsigned long /*id*/, const std::string& /*table*/, const std::string& /*database*/) {}
+    // All events.
+    virtual void tick(time_t when) {}
+    // FORMAT_DESCRIPTION events.
+    virtual void tickFormatDescription() {}
+    // QUERY events.
+    virtual void tickQuery() {}
+    // ROTATE events.
+    virtual void tickRotate() {}
+    // XID events.
+    virtual void tickXid() {}
+    // Unprocessed libslave events.
+    virtual void tickOther() {}
+    // UPDATE/INSERT/DELETE missed (there are not callbacks on given type of operation).
+    virtual void tickModifyIgnored(const unsigned long /*id*/, EventKind /*kind*/) {}
+    // UPDATE/INSERT/DELETE successfully processed.
+    virtual void tickModifyDone(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
+    // UPDATE/INSERT/DELETE processed with errors (caught exception).
+    virtual void tickModifyFailed(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
+};
 }
 
 

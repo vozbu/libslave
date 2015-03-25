@@ -57,6 +57,7 @@ private:
     MasterInfo m_master_info;
     EmptyExtState empty_ext_state;
     ExtStateIface &ext_state;
+    EventStatIface* event_stat = nullptr;
 
     table_order_t m_table_order;
     callbacks_t m_callbacks;
@@ -76,6 +77,11 @@ public:
     Slave(ExtStateIface &state) : ext_state(state) {}
     Slave(const MasterInfo& _master_info) : m_master_info(_master_info), ext_state(empty_ext_state) {}
     Slave(const MasterInfo& _master_info, ExtStateIface &state) : m_master_info(_master_info), ext_state(state) {}
+
+    void linkEventStat(EventStatIface* _event_stat)
+    {
+        event_stat = _event_stat;
+    }
 
     // Makes sense only when get_remote_binlog is not started
     void setMasterInfo(const MasterInfo& aMasterInfo)
