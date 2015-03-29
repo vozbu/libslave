@@ -88,7 +88,7 @@ namespace // anonymous
 
         Atomic() {}
         Atomic(T aValue) : m_Value(aValue) {}
-        Atomic(const Atomic& r) : m_Value(r) {} // использует operator T
+        Atomic(const Atomic& r) : m_Value(r) {} // uses operator T
         Atomic& operator= (const Atomic& r) { return operator = (static_cast<T>(r)); }
 
         T operator++ ()         { return __sync_add_and_fetch(&m_Value, 1); }
@@ -332,11 +332,11 @@ namespace // anonymous
 
             m_Slave.createDatabaseStructure();
 
-            // Запускаем libslave с нашим кастомной функцией остановки, которая еще и сигнализирует,
-            // когда слейв прочитал позицию бинлога и готов получать сообщения
+            // Run libslave with our custom stop-function, which also signals
+            // when slave has read binlog position and is ready to get messages.
             m_SlaveThread = boost::thread([this] () { m_Slave.get_remote_binlog(std::ref(m_StopFlag)); });
 
-            // Ждем, чтобы libslave запустился - не более 1000 раз по 1 мс
+            // Wait libslave to run - no more than 1000 times with 1 ms.
             const timespec ts = {0 , 1000000};
             size_t i = 0;
             for (; i < 1000; ++i)
@@ -355,7 +355,7 @@ namespace // anonymous
 
             conn.reset(new nanomysql::Connection(cfg.mysql_host, cfg.mysql_user, cfg.mysql_pass, cfg.mysql_db));
             conn->query("set names utf8");
-            // Создаем таблицу, т.к. если ее нет, libslave ругнется на ее отсутствие, и тест закончится
+            // Create table, because if it does not exist, libslave will swear the lack of it, and test will finished.
             conn->query("CREATE TABLE IF NOT EXISTS test (tmp int)");
             // Create another table for testing map_detailed stat.
             conn->query("CREATE TABLE IF NOT EXISTS stat (tmp int)");
@@ -368,7 +368,7 @@ namespace // anonymous
 
             m_Slave.setMasterInfo(sMasterInfo);
             m_Slave.linkEventStat(&m_SlaveStat);
-            // Ставим колбек из фиксчи - а он будет вызывать колбеки, которые ему будут ставить в тестах
+            // Set callback into Fixture - and it will call callbacks which will be set in tests.
             m_Slave.setCallback(cfg.mysql_db, "test", boost::ref(m_Callback), filter);
             m_Slave.setCallback(cfg.mysql_db, "stat", boost::ref(m_Callback), filter);
             m_Slave.init();
@@ -518,14 +518,14 @@ namespace // anonymous
         template<typename T, typename F>
         void check(F f, const std::string& aQuery, const std::string& aErrorMsg, slave::EventKind sort)
         {
-            // Устанавливаем в libslave колбек для проверки этого значения
+            // Set callback in libslave for checking the value.
             Collector<T> sCallback;
             m_Callback.setCallback(std::ref(sCallback));
-            // Проверяем, что не было нежелательных вызовов до этого
+            // Check the lack of unwanted calls before the case.
             if (0 != m_Callback.m_UnwantedCalls)
                 BOOST_ERROR("Unwanted calls before this case: " << m_Callback.m_UnwantedCalls << aErrorMsg);
 
-            // Модифицируем таблицу
+            // Modify table.
             conn->query(aQuery);
 
             if (waitCall(sCallback))
@@ -541,8 +541,8 @@ namespace // anonymous
                     BOOST_ERROR("Have no calls to libslave callback");
             }
 
-            // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-            // строку он не мучал больше, пока мы ее проверяем
+            // Reset our callback, because exiting from scope it will destroy, and at the same time
+            // in order to avoid its touching the string while we check the string.
             m_Callback.setCallback();
         }
 
@@ -621,7 +621,7 @@ namespace // anonymous
                 }
                 else
                 {
-                    // стоит if, т.к. в противном случае callback не дернется
+                    // IF statement here, because otherwise callback will not trigger.
                     if (data[i-1].expected != data[i].expected)
                         checkUpdate<T>(data[i-1], data[i]);
                 }
@@ -658,11 +658,11 @@ namespace // anonymous
         std::cout << "You probably should specify parameters to mysql in the file " << TestDataDir << "mysql.conf first" << std::endl;
     }
 
-    // Проверяем, что если останавливаем слейв, он в дальнейшем продолжит читать с той же позиции
+    // Check, if stop slave, in the future it will continue reading from the same position.
     void test_StartStopPosition()
     {
         Fixture f;
-        // Создаем нужную таблицу
+        // Create needed table.
         f.conn->query("DROP TABLE IF EXISTS test");
         f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
 
@@ -682,11 +682,11 @@ namespace // anonymous
             BOOST_ERROR("Have no calls to libslave callback for " << sErrorMessage);
         sCallback.checkInsert(345234, sErrorMessage);
 
-        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-        // строку он не мучал больше, пока мы ее проверяем
+        // Reset our callback, because exiting from scope it will destroy, and at the same time
+        // in order to avoid its touching the string while we check the string.
         f.m_Callback.setCallback();
 
-        // Проверяем, что не было нежелательных вызовов до этого
+        // Check the lack of unwanted calls before the case.
         if (0 != f.m_Callback.m_UnwantedCalls)
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
     }
@@ -725,32 +725,32 @@ namespace // anonymous
         }
     };
 
-    // Проверяем, работает ли ручное выставление позиции бинлога
+    // Check whether manual setting of binlog position works.
     void test_SetBinlogPos()
     {
         Fixture f;
-        // Создаем нужную таблицу
+        // Create needed table.
         f.conn->query("DROP TABLE IF EXISTS test");
         f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
 
         f.checkInsertValue(uint32_t(12321), "12321", "");
 
-        // Запоминаем позицию
+        // Remember position.
         const slave::Slave::binlog_pos_t sInitialBinlogPos = f.m_Slave.getLastBinlog();
 
-        // Вставляем значение, читаем его
+        // Insert value, read it.
         f.checkInsertValue(uint32_t(12322), "12322", "");
 
         f.stopSlave();
 
-        // Вставляем новое значение
+        // Insert new value.
         f.conn->query("INSERT INTO test VALUES (345234)");
 
-        // И получаем новую позицию
+        // And get new position.
         const slave::Slave::binlog_pos_t sCurBinlogPos = f.m_Slave.getLastBinlog();
         BOOST_CHECK_NE(sCurBinlogPos.second, sInitialBinlogPos.second);
 
-        // Теперь выставляем в слейв старую позицию и проверяем, что 2 INSERTа прочтутся (12322 и 345234)
+        // Now set old position in slave and check that 2 INSERTs will have been read (12322 and 345234).
         slave::MasterInfo sMasterInfo = f.m_Slave.masterInfo();
         sMasterInfo.master_log_name = sInitialBinlogPos.first;
         sMasterInfo.master_log_pos = sInitialBinlogPos.second;
@@ -765,7 +765,7 @@ namespace // anonymous
 
         f.m_SlaveThread = boost::thread([&f, sCurBinlogPos] () { f.m_Slave.get_remote_binlog(CheckBinlogPos(f.m_Slave, sCurBinlogPos)); });
 
-        // Ждем отработки колбека максимум 1 секунду
+        // Wait callback triggering no more than 1 second.
         const timespec ts = {0 , 1000000};
         size_t i = 0;
         for (; i < 1000; ++i)
@@ -777,8 +777,8 @@ namespace // anonymous
         if (sCallback.counter < 2)
             BOOST_ERROR ("Have less than two calls to libslave callback for 1 second");
 
-        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-        // строку он не мучал больше, пока мы ее проверяем
+        // Reset our callback, because exiting from scope it will destroy, and at the same time
+        // in order to avoid its touching the string while we check the string.
         f.m_Callback.setCallback();
 
         if (!sCallback.fail.empty())
@@ -787,11 +787,11 @@ namespace // anonymous
         BOOST_CHECK_MESSAGE (f.m_SlaveThread.joinable(), "m_Slave.get_remote_binlog is not finished yet and will be never!");
     }
 
-    // Проверяем, что если соединение с базой рвется (без выхода из get_remote_binlog), то начинаем читать оттуда, где остановились
+    // Check, if connection to db loses (without exit from get_remote_binlog), then start reading from position where stopped.
     void test_Disconnect()
     {
         Fixture f;
-        // Создаем нужную таблицу
+        // Create needed table.
         f.conn->query("DROP TABLE IF EXISTS test");
         f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
 
@@ -810,11 +810,11 @@ namespace // anonymous
             BOOST_ERROR("Have no calls to libslave callback for " << sErrorMessage);
         sCallback.checkInsert(345234, sErrorMessage);
 
-        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-        // строку он не мучал больше, пока мы ее проверяем
+        // Reset our callback, because exiting from scope it will destroy, and at the same time
+        // in order to avoid its touching the string while we check the string.
         f.m_Callback.setCallback();
 
-        // Проверяем, что не было нежелательных вызовов до этого
+        // Check the lack of unwanted calls before the case.
         if (0 != f.m_Callback.m_UnwantedCalls)
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
     }
@@ -919,7 +919,7 @@ namespace // anonymous
     void getValue(const std::string& s, std::string& t)
     {
         t = s;
-        // Убираем ведущий пробел
+        // Remove leading space.
         t.erase(0, 1);
     }
 
@@ -970,7 +970,7 @@ namespace // anonymous
                 if (tokens.size() != 3)
                     BOOST_FAIL("Malformed string '" << line << "' in the file '" << sDataFilename << "'");
 
-                // Получаем значение, с которым надо будет сравнить значение из libslave
+                // Get value. Value from libslave must be compared with it.
                 slave_type checked_value;
                 getValue(tokens[2], checked_value);
 
@@ -1137,7 +1137,7 @@ namespace // anonymous
         // Reset our callback.
         f.m_Callback.setCallback();
 
-        // Check unwanted calls.
+        // Check the lack of unwanted calls.
         if (0 != f.m_Callback.m_UnwantedCalls)
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
     }
