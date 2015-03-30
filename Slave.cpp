@@ -372,13 +372,13 @@ void Slave::get_remote_binlog( const boost::function< bool() >& _interruptFlag)
 
 connected:
 
-    // Получим позицию бинлога, сохранённую в ext_state ранее, или загрузим её
-    // из persistent хранилища. false в случае, если не удалось получить позицию.
+    // Get binlog position saved in ext_state before, or load it
+    // from persistent storage. Get false if failed to get binlog position.
     if( !ext_state.getMasterInfo(
                 m_master_info.master_log_name,
                 m_master_info.master_log_pos) ) {
-        // Если сохранённой ранее позиции бинлога нет,
-        // получаем последнюю версию бинлога и смещение
+        // If there is not binlog position saved before,
+        // get last binlog name and last binlog position.
         std::pair<std::string,unsigned int> row = getLastBinlog();
 
         m_master_info.master_log_name = row.first;
@@ -419,10 +419,10 @@ connected:
                                   "slave. If the entry is correct, restart the server with a higher value of "
                                   "max_allowed_packet. max_allowed_packet=" << mysql_error(&mysql) );
                         break;
-                    case ER_MASTER_FATAL_ERROR_READING_BINLOG: // Ошибка -- неизвестный бинлог-файл.
+                    case ER_MASTER_FATAL_ERROR_READING_BINLOG: // Error -- unknown binlog file.
                         LOG_ERROR(log, "Myslave: fatal error reading binlog. " <<  mysql_error(&mysql) );
                         break;
-                    case 2013: // Обработка ошибки 'Lost connection to MySQL'
+                    case 2013: // Processing error 'Lost connection to MySQL'
                         LOG_WARNING(log, "Myslave: Error from MySQL: " << mysql_error(&mysql) );
                         // Check if connection closed by user for exiting from the loop
                         if (_interruptFlag())
@@ -452,7 +452,8 @@ connected:
 
             if (!slave::read_log_event((const char*) mysql.net.read_pos + 1,
                                        len - 1,
-                                       event)) {
+                                       event,
+                                       event_stat)) {
 
                 LOG_TRACE(log, "Skipping unknown event.");
                 continue;
@@ -800,6 +801,8 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
 
         m_rli.setTableName(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
 
+        if (event_stat)
+            event_stat->processTableMap(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
         break;
     }
 
@@ -813,7 +816,7 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
 
         Row_event_info roi(bei.buf, bei.event_len, (bei.type == UPDATE_ROWS_EVENT));
 
-        apply_row_event(m_rli, bei, roi, ext_state);
+        apply_row_event(m_rli, bei, roi, ext_state, event_stat);
 
         break;
     }

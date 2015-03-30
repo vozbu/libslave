@@ -88,7 +88,7 @@ namespace // anonymous
 
         Atomic() {}
         Atomic(T aValue) : m_Value(aValue) {}
-        Atomic(const Atomic& r) : m_Value(r) {} // использует operator T
+        Atomic(const Atomic& r) : m_Value(r) {} // uses operator T
         Atomic& operator= (const Atomic& r) { return operator = (static_cast<T>(r)); }
 
         T operator++ ()         { return __sync_add_and_fetch(&m_Value, 1); }
@@ -151,8 +151,118 @@ namespace // anonymous
             unsigned long   intransaction_pos;
         };
 
+        class TestSlaveStat : public slave::EventStatIface
+        {
+        public:
+            time_t   last_event_master_time  = 0;
+            time_t   last_event_receive_time = 0;
+
+            uint64_t events_total              = 0;
+            uint64_t events_table_map          = 0;
+            uint64_t events_format_description = 0;
+            uint64_t events_query              = 0;
+            uint64_t events_rotate             = 0;
+            uint64_t events_xid                = 0;
+            uint64_t events_other              = 0;
+            uint64_t events_modify             = 0;
+
+            struct Counter
+            {
+                uint64_t total   = 0;
+                uint64_t ignored = 0;
+                time_t   done    = 0;
+                time_t   failed  = 0;
+            };
+
+            std::map<std::pair<std::string, std::string>, unsigned long>  map_table;
+            std::map<slave::EventKind, Counter>                           map_kind;
+            std::map<std::pair<unsigned long, slave::EventKind>, Counter> map_detailed;
+
+            virtual void processTableMap(const unsigned long id, const std::string& table, const std::string& database)
+            {
+                const auto key = std::make_pair(database, table);
+                map_table[key] = id;
+                ++events_table_map;
+            }
+
+            virtual void tick(time_t when)
+            {
+                ++events_total;
+                if (when != 0)
+                {
+                    last_event_master_time  = when;
+                    last_event_receive_time = ::time(NULL);
+                }
+            }
+
+            virtual void tickFormatDescription() { ++events_format_description; }
+
+            virtual void tickQuery() { ++events_query; }
+
+            virtual void tickRotate() { ++events_rotate; }
+
+            virtual void tickXid() { ++events_xid; }
+
+            virtual void tickOther() { ++events_other; }
+
+            virtual void tickModifyIgnored(const unsigned long id, slave::EventKind kind)
+            {
+                ++events_modify;
+
+                Counter sCounter;
+                if (map_kind.find(kind) == map_kind.end())
+                    map_kind[kind] = sCounter;
+
+                const auto key = std::make_pair(id, kind);
+                if (map_detailed.find(key) == map_detailed.end())
+                    map_detailed[key] = sCounter;
+
+                map_kind[kind].total      += 1;
+                map_kind[kind].ignored    += 1;
+                map_detailed[key].total   += 1;
+                map_detailed[key].ignored += 1;
+            }
+
+            virtual void tickModifyDone(const unsigned long id, slave::EventKind kind, uint64_t time)
+            {
+                ++events_modify;
+
+                Counter sCounter;
+                if (map_kind.find(kind) == map_kind.end())
+                    map_kind[kind] = sCounter;
+
+                const auto key = std::make_pair(id, kind);
+                if (map_detailed.find(key) == map_detailed.end())
+                    map_detailed[key] = sCounter;
+
+                map_kind[kind].total    += 1;
+                map_kind[kind].done     += time;
+                map_detailed[key].total += 1;
+                map_detailed[key].done  += time;
+            }
+
+            virtual void tickModifyFailed(const unsigned long id, slave::EventKind kind, uint64_t time)
+            {
+                ++events_modify;
+
+                Counter sCounter;
+                if (map_kind.find(kind) == map_kind.end())
+                    map_kind[kind] = sCounter;
+
+                const auto key = std::make_pair(id, kind);
+                if (map_detailed.find(key) == map_detailed.end())
+                    map_detailed[key] = sCounter;
+
+                map_kind[kind].total     += 1;
+                map_kind[kind].failed    += time;
+                map_detailed[key].total  += 1;
+                map_detailed[key].failed += time;
+            }
+        };
+
         config cfg;
         TestExtState m_ExtState;
+        TestSlaveStat m_SlaveStat;
         slave::Slave m_Slave;
         boost::shared_ptr<nanomysql::Connection> conn;
 
@@ -222,11 +332,11 @@ namespace // anonymous
 
             m_Slave.createDatabaseStructure();
 
-            // Запускаем libslave с нашим кастомной функцией остановки, которая еще и сигнализирует,
-            // когда слейв прочитал позицию бинлога и готов получать сообщения
+            // Run libslave with our custom stop-function, which also signals
+            // when slave has read binlog position and is ready to get messages.
             m_SlaveThread = boost::thread([this] () { m_Slave.get_remote_binlog(std::ref(m_StopFlag)); });
 
-            // Ждем, чтобы libslave запустился - не более 1000 раз по 1 мс
+            // Wait libslave to run - no more than 1000 times with 1 ms.
             const timespec ts = {0 , 1000000};
             size_t i = 0;
             for (; i < 1000; ++i)
@@ -245,8 +355,10 @@ namespace // anonymous
 
             conn.reset(new nanomysql::Connection(cfg.mysql_host, cfg.mysql_user, cfg.mysql_pass, cfg.mysql_db));
             conn->query("set names utf8");
-            // Создаем таблицу, т.к. если ее нет, libslave ругнется на ее отсутствие, и тест закончится
+            // Create table, because if it does not exist, libslave will swear the lack of it, and test will finished.
             conn->query("CREATE TABLE IF NOT EXISTS test (tmp int)");
+            // Create another table for testing map_detailed stat.
+            conn->query("CREATE TABLE IF NOT EXISTS stat (tmp int)");
 
             slave::MasterInfo sMasterInfo;
             sMasterInfo.host = cfg.mysql_host;
@@ -255,8 +367,10 @@ namespace // anonymous
             sMasterInfo.password = cfg.mysql_pass;
 
             m_Slave.setMasterInfo(sMasterInfo);
-            // Ставим колбек из фиксчи - а он будет вызывать колбеки, которые ему будут ставить в тестах
+            m_Slave.linkEventStat(&m_SlaveStat);
+            // Set callback into Fixture - and it will call callbacks which will be set in tests.
             m_Slave.setCallback(cfg.mysql_db, "test", boost::ref(m_Callback), filter);
+            m_Slave.setCallback(cfg.mysql_db, "stat", boost::ref(m_Callback), filter);
             m_Slave.init();
             startSlave();
         }
@@ -366,11 +480,10 @@ namespace // anonymous
             }
         };
 
-        template<typename T>
-        bool waitCall(const Collector<T>& aCallback)
+        void waitCall()
         {
             std::string   log_name;
-            unsigned long log_pos;
+            unsigned long log_pos = 0;
             conn->query("SHOW MASTER STATUS");
             conn->use([&log_name, &log_pos](const nanomysql::fields_t& row)
             {
@@ -385,6 +498,12 @@ namespace // anonymous
                        log_pos  == m_ExtState.getMasterLogPos();
             }))
                 BOOST_ERROR("Condition variable timed out");
+        }
+
+        template<typename T>
+        bool waitCall(const Collector<T>& aCallback)
+        {
+            waitCall();
 
             if (aCallback.data.empty())
                 return false;
@@ -399,14 +518,14 @@ namespace // anonymous
         template<typename T, typename F>
         void check(F f, const std::string& aQuery, const std::string& aErrorMsg, slave::EventKind sort)
         {
-            // Устанавливаем в libslave колбек для проверки этого значения
+            // Set callback in libslave for checking the value.
             Collector<T> sCallback;
             m_Callback.setCallback(std::ref(sCallback));
-            // Проверяем, что не было нежелательных вызовов до этого
+            // Check the lack of unwanted calls before the case.
             if (0 != m_Callback.m_UnwantedCalls)
                 BOOST_ERROR("Unwanted calls before this case: " << m_Callback.m_UnwantedCalls << aErrorMsg);
 
-            // Модифицируем таблицу
+            // Modify table.
             conn->query(aQuery);
 
             if (waitCall(sCallback))
@@ -422,8 +541,8 @@ namespace // anonymous
                     BOOST_ERROR("Have no calls to libslave callback");
             }
 
-            // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-            // строку он не мучал больше, пока мы ее проверяем
+            // Reset our callback, because exiting from scope it will destroy, and at the same time
+            // in order to avoid its touching the string while we check the string.
             m_Callback.setCallback();
         }
 
@@ -502,7 +621,7 @@ namespace // anonymous
                 }
                 else
                 {
-                    // стоит if, т.к. в противном случае callback не дернется
+                    // IF statement here, because otherwise callback will not trigger.
                     if (data[i-1].expected != data[i].expected)
                         checkUpdate<T>(data[i-1], data[i]);
                 }
@@ -539,11 +658,11 @@ namespace // anonymous
         std::cout << "You probably should specify parameters to mysql in the file " << TestDataDir << "mysql.conf first" << std::endl;
     }
 
-    // Проверяем, что если останавливаем слейв, он в дальнейшем продолжит читать с той же позиции
+    // Check, if stop slave, in the future it will continue reading from the same position.
     void test_StartStopPosition()
     {
         Fixture f;
-        // Создаем нужную таблицу
+        // Create needed table.
         f.conn->query("DROP TABLE IF EXISTS test");
         f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
 
@@ -563,11 +682,11 @@ namespace // anonymous
             BOOST_ERROR("Have no calls to libslave callback for " << sErrorMessage);
         sCallback.checkInsert(345234, sErrorMessage);
 
-        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-        // строку он не мучал больше, пока мы ее проверяем
+        // Reset our callback, because exiting from scope it will destroy, and at the same time
+        // in order to avoid its touching the string while we check the string.
         f.m_Callback.setCallback();
 
-        // Проверяем, что не было нежелательных вызовов до этого
+        // Check the lack of unwanted calls before the case.
         if (0 != f.m_Callback.m_UnwantedCalls)
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
     }
@@ -606,32 +725,32 @@ namespace // anonymous
         }
     };
 
-    // Проверяем, работает ли ручное выставление позиции бинлога
+    // Check whether manual setting of binlog position works.
     void test_SetBinlogPos()
     {
         Fixture f;
-        // Создаем нужную таблицу
+        // Create needed table.
         f.conn->query("DROP TABLE IF EXISTS test");
         f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
 
         f.checkInsertValue(uint32_t(12321), "12321", "");
 
-        // Запоминаем позицию
+        // Remember position.
         const slave::Slave::binlog_pos_t sInitialBinlogPos = f.m_Slave.getLastBinlog();
 
-        // Вставляем значение, читаем его
+        // Insert value, read it.
         f.checkInsertValue(uint32_t(12322), "12322", "");
 
         f.stopSlave();
 
-        // Вставляем новое значение
+        // Insert new value.
         f.conn->query("INSERT INTO test VALUES (345234)");
 
-        // И получаем новую позицию
+        // And get new position.
         const slave::Slave::binlog_pos_t sCurBinlogPos = f.m_Slave.getLastBinlog();
         BOOST_CHECK_NE(sCurBinlogPos.second, sInitialBinlogPos.second);
 
-        // Теперь выставляем в слейв старую позицию и проверяем, что 2 INSERTа прочтутся (12322 и 345234)
+        // Now set old position in slave and check that 2 INSERTs will have been read (12322 and 345234).
         slave::MasterInfo sMasterInfo = f.m_Slave.masterInfo();
         sMasterInfo.master_log_name = sInitialBinlogPos.first;
         sMasterInfo.master_log_pos = sInitialBinlogPos.second;
@@ -646,7 +765,7 @@ namespace // anonymous
 
         f.m_SlaveThread = boost::thread([&f, sCurBinlogPos] () { f.m_Slave.get_remote_binlog(CheckBinlogPos(f.m_Slave, sCurBinlogPos)); });
 
-        // Ждем отработки колбека максимум 1 секунду
+        // Wait callback triggering no more than 1 second.
         const timespec ts = {0 , 1000000};
         size_t i = 0;
         for (; i < 1000; ++i)
@@ -658,8 +777,8 @@ namespace // anonymous
         if (sCallback.counter < 2)
             BOOST_ERROR ("Have less than two calls to libslave callback for 1 second");
 
-        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-        // строку он не мучал больше, пока мы ее проверяем
+        // Reset our callback, because exiting from scope it will destroy, and at the same time
+        // in order to avoid its touching the string while we check the string.
         f.m_Callback.setCallback();
 
         if (!sCallback.fail.empty())
@@ -668,11 +787,11 @@ namespace // anonymous
         BOOST_CHECK_MESSAGE (f.m_SlaveThread.joinable(), "m_Slave.get_remote_binlog is not finished yet and will be never!");
     }
 
-    // Проверяем, что если соединение с базой рвется (без выхода из get_remote_binlog), то начинаем читать оттуда, где остановились
+    // Check, if connection to db loses (without exit from get_remote_binlog), then start reading from position where stopped.
     void test_Disconnect()
     {
         Fixture f;
-        // Создаем нужную таблицу
+        // Create needed table.
         f.conn->query("DROP TABLE IF EXISTS test");
         f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
 
@@ -691,11 +810,11 @@ namespace // anonymous
             BOOST_ERROR("Have no calls to libslave callback for " << sErrorMessage);
         sCallback.checkInsert(345234, sErrorMessage);
 
-        // Убираем наш колбек, т.к. он при выходе из блока уничтожится, заодно чтобы
-        // строку он не мучал больше, пока мы ее проверяем
+        // Reset our callback, because exiting from scope it will destroy, and at the same time
+        // in order to avoid its touching the string while we check the string.
         f.m_Callback.setCallback();
 
-        // Проверяем, что не было нежелательных вызовов до этого
+        // Check the lack of unwanted calls before the case.
         if (0 != f.m_Callback.m_UnwantedCalls)
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
     }
@@ -800,7 +919,7 @@ namespace // anonymous
     void getValue(const std::string& s, std::string& t)
     {
         t = s;
-        // Убираем ведущий пробел
+        // Remove leading space.
         t.erase(0, 1);
     }
 
@@ -851,7 +970,7 @@ namespace // anonymous
                 if (tokens.size() != 3)
                     BOOST_FAIL("Malformed string '" << line << "' in the file '" << sDataFilename << "'");
 
-                // Получаем значение, с которым надо будет сравнить значение из libslave
+                // Get value. Value from libslave must be compared with it.
                 slave_type checked_value;
                 getValue(tokens[2], checked_value);
 
@@ -892,6 +1011,333 @@ namespace // anonymous
         testOneType<boost::mpl::int_<MYSQL_BIT>>(f);
         testOneType<boost::mpl::int_<MYSQL_SET>>(f);
     }
+
+    void testStatOneFilter(slave::EventKind filter)
+    {
+        for (auto& sKindRun: slave::eventKindList())
+        {
+            Fixture f(filter);
+
+            f.conn->query("DROP TABLE IF EXISTS test");
+            f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+            f.conn->query("INSERT INTO test VALUES (1)");
+
+            std::string sQuery;
+            switch (sKindRun)
+            {
+            case slave::eInsert:
+                sQuery = "INSERT INTO test VALUES (9)";
+                break;
+            case slave::eUpdate:
+                sQuery = "UPDATE test SET value=2 WHERE value=1";
+                break;
+            default:
+                sQuery = "DELETE FROM test WHERE value=1";
+                break;
+            }
+
+            f.conn->query(sQuery);
+            f.waitCall();
+
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              12);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_table_map,          2);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_format_description, 1);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,              4);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_rotate,             1);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                2);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             2);
+
+            auto sPair = std::make_pair(f.cfg.mysql_db, "test");
+            if (f.m_SlaveStat.map_table.find(sPair) == f.m_SlaveStat.map_table.end())
+                BOOST_ERROR("map_table key does not exist");
+            const auto id = f.m_SlaveStat.map_table[sPair];
+
+            for (auto& kind: slave::eventKindList())
+            {
+                const auto key = std::make_pair(id, kind);
+
+                uint64_t sFlag             = static_cast<uint64_t>(sKindRun == kind);
+                uint64_t sShouldNotProcess = static_cast<uint64_t>(!f.shouldProcess(filter, kind));
+                if (kind == slave::eInsert)
+                    ++sFlag;
+
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,      sFlag);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,   sFlag);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].ignored,    sShouldNotProcess * sFlag);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].ignored, sShouldNotProcess * sFlag);
+
+                if (sShouldNotProcess == 0 && (kind == sKindRun || kind == slave::eInsert))
+                {
+                    BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].done,    0);
+                    BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].done, 0);
+                }
+                else
+                {
+                    BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].done,    0);
+                    BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].done, 0);
+                }
+
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,  0);
+            }
+        }
+    }
+
+    struct CallbackFailedEvent
+    {
+        void operator() (const slave::RecordSet& rs)
+        {
+            throw std::exception();
+        }
+    };
+
+    void testFailedEvents()
+    {
+        Fixture f;
+
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+
+        CallbackFailedEvent sCallback;
+        f.m_Callback.setCallback(std::ref(sCallback));
+
+        f.conn->query("INSERT INTO test VALUES (345234)");
+        f.waitCall();
+
+        auto sPair = std::make_pair(f.cfg.mysql_db, "test");
+        if (f.m_SlaveStat.map_table.find(sPair) == f.m_SlaveStat.map_table.end())
+            BOOST_ERROR("map_table key does not exist");
+        const auto id = f.m_SlaveStat.map_table[sPair];
+
+        for (auto& kind: slave::eventKindList())
+        {
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].ignored, 0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].done,    0);
+
+            const auto key = std::make_pair(id, kind);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].ignored, 0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].done,    0);
+
+            if (kind == slave::eInsert)
+            {
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,     1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].failed,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,  1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].failed, 0);
+            }
+            else
+            {
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,     0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,  0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].failed, 0);
+            }
+        }
+
+        // Reset our callback.
+        f.m_Callback.setCallback();
+
+        // Check the lack of unwanted calls.
+        if (0 != f.m_Callback.m_UnwantedCalls)
+            BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
+    }
+
+    void testTableMapAndQueryEvents()
+    {
+        Fixture f;
+
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+
+        f.conn->query("INSERT INTO test VALUES (1)");
+        f.waitCall();
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_table_map, 1);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,     3);
+
+        f.conn->query("DELETE FROM test WHERE value=1");
+        f.waitCall();
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_table_map, 2);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,     4);
+
+        f.conn->query("ALTER TABLE test ADD COLUMN tmp INT");
+        f.conn->query("INSERT INTO test VALUES (1, 2)");
+        f.waitCall();
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_table_map, 3);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,     6);
+
+        f.conn->query("DROP TABLE test");
+        f.conn->query("CREATE TABLE test (value int)");
+        f.conn->query("INSERT INTO test VALUES (1)");
+        f.conn->query("UPDATE test SET value=2 WHERE value=1");
+        f.conn->query("DELETE FROM test WHERE value=2");
+        f.waitCall();
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_table_map, 6);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,     11);
+    }
+
+    void testXidEvents()
+    {
+        Fixture f;
+
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+
+        f.conn->query("START TRANSACTION");
+        f.conn->query("INSERT INTO test VALUES (1)");
+        f.conn->query("COMMIT");
+
+        f.conn->query("START TRANSACTION");
+        f.conn->query("INSERT INTO test VALUES (2)");
+        f.conn->query("UPDATE test SET value=3 WHERE value=1");
+        f.conn->query("DELETE FROM test WHERE value=2");
+        f.conn->query("COMMIT");
+
+        f.conn->query("UPDATE test SET value=4 WHERE value=3");
+        f.conn->query("DELETE FROM test WHERE value=4");
+
+        f.waitCall();
+
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              24);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_table_map,          6);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_format_description, 1);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,              6);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_rotate,             1);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                4);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             6);
+
+        auto sPair = std::make_pair(f.cfg.mysql_db, "test");
+        if (f.m_SlaveStat.map_table.find(sPair) == f.m_SlaveStat.map_table.end())
+            BOOST_ERROR("map_table key does not exist");
+        const auto id = f.m_SlaveStat.map_table[sPair];
+
+        for (auto& kind: slave::eventKindList())
+        {
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,   2);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].ignored, 0);
+            BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].done,    0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,  0);
+
+            const auto key = std::make_pair(id, kind);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,   2);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].ignored, 0);
+            BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].done,    0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].failed,  0);
+        }
+    }
+
+    void testMapDetailed()
+    {
+        Fixture f;
+
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+        f.conn->query("DROP TABLE IF EXISTS stat");
+        f.conn->query("CREATE TABLE IF NOT EXISTS stat (value int)");
+
+        f.conn->query("INSERT INTO stat VALUES (1)");
+        f.waitCall();
+
+        auto sPairStat = std::make_pair(f.cfg.mysql_db, "stat");
+        if (f.m_SlaveStat.map_table.find(sPairStat) == f.m_SlaveStat.map_table.end())
+            BOOST_ERROR("map_table key does not exist");
+
+        auto sIdStat = f.m_SlaveStat.map_table[sPairStat];
+
+        for (auto& kind: slave::eventKindList())
+        {
+            const auto sKeyStat = std::make_pair(sIdStat, kind);
+
+            if (kind == slave::eInsert)
+            {
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+            }
+            else
+            {
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+            }
+
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].ignored, 0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].failed,  0);
+        }
+
+        f.conn->query("INSERT INTO test VALUES (1)");
+        f.conn->query("UPDATE test SET value=2 WHERE value=1");
+        f.waitCall();
+
+        auto sPairTest = std::make_pair(f.cfg.mysql_db, "test");
+        if (f.m_SlaveStat.map_table.find(sPairTest) == f.m_SlaveStat.map_table.end())
+            BOOST_ERROR("map_table key does not exist");
+
+        auto sIdTest = f.m_SlaveStat.map_table[sPairTest];
+
+        for (auto& kind: slave::eventKindList())
+        {
+            const auto sKeyTest = std::make_pair(sIdTest, kind);
+            const auto sKeyStat = std::make_pair(sIdStat, kind);
+
+            if (kind == slave::eInsert)
+            {
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+            }
+            else
+            {
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+            }
+
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].ignored, 0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].failed,  0);
+
+            if (kind == slave::eDelete)
+            {
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].total,   0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].done,    0);
+            }
+            else
+            {
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].total,   1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyTest].done,    0);
+            }
+
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].ignored, 0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].failed,  0);
+        }
+    }
+
+    void testLastEventTime()
+    {
+        Fixture f;
+
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+
+        f.conn->query("INSERT INTO test VALUES (345234)");
+        f.waitCall();
+
+        BOOST_CHECK_LE(f.m_SlaveStat.last_event_master_time, f.m_SlaveStat.last_event_receive_time);
+    }
+
+    void test_Stat()
+    {
+        testStatOneFilter(slave::eAll);
+        testStatOneFilter(slave::eInsert);
+        testStatOneFilter(slave::eUpdate);
+        testStatOneFilter(slave::eDelete);
+        testStatOneFilter(slave::eNone);
+        testStatOneFilter(static_cast<slave::EventKind>(~static_cast<uint8_t>(slave::eInsert)));
+        testStatOneFilter(static_cast<slave::EventKind>(~static_cast<uint8_t>(slave::eUpdate)));
+        testStatOneFilter(static_cast<slave::EventKind>(~static_cast<uint8_t>(slave::eDelete)));
+
+        testFailedEvents();
+        testTableMapAndQueryEvents();
+        testXidEvents();
+        testMapDetailed();
+        testLastEventTime();
+    }
 }// anonymous-namespace
 
 test_suite* init_unit_test_suite(int argc, char* argv[])
@@ -903,6 +1349,7 @@ test_suite* init_unit_test_suite(int argc, char* argv[])
     ADD_FIXTURE_TEST(test_StartStopPosition);
     ADD_FIXTURE_TEST(test_SetBinlogPos);
     ADD_FIXTURE_TEST(test_Disconnect);
+    ADD_FIXTURE_TEST(test_Stat);
 
 #undef ADD_FIXTURE_TEST
 

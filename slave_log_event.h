@@ -165,9 +165,9 @@ struct Row_event_info {
 };
 
 
-bool read_log_event(const char* buf, unsigned int event_len, Basic_event_info& info);
+bool read_log_event(const char* buf, unsigned int event_len, Basic_event_info& info, EventStatIface* event_stat);
 
-void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, const Row_event_info& roi, ExtStateIface &ext_state);
+void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, const Row_event_info& roi, ExtStateIface &ext_state, EventStatIface* event_stat);
 
 
 //------------------------------------------------------------------------------------------
