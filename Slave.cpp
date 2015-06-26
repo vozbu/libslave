@@ -837,6 +837,7 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo& m_rli
                 {
                     it->second->m_callback = m_callbacks[key];
                     it->second->m_filter = m_filters[key];
+                    it->second->set_column_filter(m_column_filters[key]);
                 }
             }
         }

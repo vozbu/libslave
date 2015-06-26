@@ -464,7 +464,9 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
 
             ptr = (unsigned char*)field->unpack((const char*)ptr);
 
-            _row[field->getFieldName()] = std::make_pair(field->field_type, field->field_data);
+            if (table->column_filter.empty() || table->column_filter[i / 8] & (1 << (i & 7))) {
+                _row[field->getFieldName()] = std::make_pair(field->field_type, field->field_data);
+            }
         }
 
         null_mask <<= 1;
@@ -479,7 +481,7 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
 
 unsigned char* do_writedelete_row(std::shared_ptr<slave::Table> table,
                                   const Basic_event_info& bei,
-                                  const Row_event_info& roi, 
+                                  const Row_event_info& roi,
                                   unsigned char* row_start,
                                   ExtStateIface &ext_state) {
 
@@ -504,7 +506,7 @@ unsigned char* do_writedelete_row(std::shared_ptr<slave::Table> table,
 
 unsigned char* do_update_row(std::shared_ptr<slave::Table> table,
                              const Basic_event_info& bei,
-                             const Row_event_info& roi, 
+                             const Row_event_info& roi,
                              unsigned char* row_start,
                              ExtStateIface &ext_state) {
 

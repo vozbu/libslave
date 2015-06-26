@@ -42,6 +42,7 @@ class Table {
 public:
 
     std::vector<PtrField> fields;
+    std::vector<unsigned char> column_filter;
 
     callback m_callback;
     EventKind m_filter;
@@ -55,6 +56,30 @@ public:
         m_callback(_rs);
     }
 
+    void set_column_filter(const std::vector<std::string> &_column_filter) {
+        if (_column_filter.empty()) {
+            column_filter.clear();
+            return;
+        }
+
+        column_filter.resize((fields.size() + 7)/8);
+        for (unsigned i = 0; i < column_filter.size(); i++) {
+            column_filter[i] = 0;
+        }
+
+        // FIXME: this loop has complexity factor of O(N*M)
+        for (auto i = _column_filter.begin(); i != _column_filter.end(); ++i) {
+            const auto &field_name = *i;
+            for (auto j = fields.begin(); j != fields.end(); ++j) {
+                const auto &field = *j;
+                if (field->getFieldName() == field_name) {
+                    const int index = j - fields.begin();
+                    column_filter[index>>3] |= (1<<(index&7));
+                    break;
+                }
+            }
+        }
+    }
 
     const std::string table_name;
     const std::string database_name;

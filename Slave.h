@@ -51,6 +51,8 @@ public:
     typedef std::map<std::pair<std::string, std::string>, callback> callbacks_t;
     typedef std::map<std::pair<std::string, std::string>, filter> filters_t;
 
+    typedef std::vector<std::string> cols_t;
+    typedef std::map<std::pair<std::string, std::string>, cols_t> column_filters_t;
 
 private:
     static inline bool falseFunction() { return false; };
@@ -69,6 +71,7 @@ private:
     table_order_t m_table_order;
     callbacks_t m_callbacks;
     filters_t m_filters;
+    column_filters_t m_column_filters;
 
     typedef std::function<void (unsigned int)> xid_callback_t;
     xid_callback_t m_xid_callback;
@@ -104,12 +107,20 @@ public:
     Position getLastBinlogPos() const;
 
     void setCallback(const std::string& _db_name, const std::string& _tbl_name, callback _callback,
+                     const cols_t &column_filter, EventKind filter = eAll)
+    {
+        setCallback(_db_name, _tbl_name, _callback, filter);
+        m_column_filters[std::make_pair(_db_name, _tbl_name)] = column_filter;
+    }
+
+    void setCallback(const std::string& _db_name, const std::string& _tbl_name, callback _callback,
                      EventKind filter = eAll)
     {
         const std::pair<std::string, std::string> key = std::make_pair(_db_name, _tbl_name);
         m_table_order.insert(key);
         m_callbacks[key] = _callback;
         m_filters[key] = filter;
+        m_column_filters[key] = cols_t();
 
         ext_state.initTableCount(_db_name + "." + _tbl_name);
     }
@@ -130,6 +141,7 @@ public:
         for (RelayLogInfo::name_to_table_t::iterator i = m_rli.m_table_map.begin(); i != m_rli.m_table_map.end(); ++i) {
             i->second->m_callback = m_callbacks[i->first];
             i->second->m_filter = m_filters[i->first];
+            i->second->set_column_filter(m_column_filters[i->first]);
         }
     }
 
