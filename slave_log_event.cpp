@@ -217,7 +217,8 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
     }
 
     if (event_stat)
-        event_stat->tick(bei.when);
+        if (bei.type != FORMAT_DESCRIPTION_EVENT && bei.type != ROTATE_EVENT)
+            event_stat->tick(bei.when);
 
     switch (bei.type) {
 

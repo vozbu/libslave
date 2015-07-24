@@ -195,11 +195,11 @@ namespace // anonymous
                 }
             }
 
-            virtual void tickFormatDescription() { ++events_format_description; }
+            virtual void tickFormatDescription() { ++events_total; ++events_format_description; }
 
             virtual void tickQuery() { ++events_query; }
 
-            virtual void tickRotate() { ++events_rotate; }
+            virtual void tickRotate() { ++events_total; ++events_rotate; }
 
             virtual void tickXid() { ++events_xid; }
 
