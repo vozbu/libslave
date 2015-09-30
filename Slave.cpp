@@ -25,6 +25,8 @@
 #include <mysql/m_ctype.h>
 #include <mysql/sql_common.h>
 
+#include <unistd.h>
+
 #define packet_end_data 1
 
 #define ER_NET_PACKET_TOO_LARGE 1153
@@ -52,6 +54,17 @@ unsigned char *net_store_data(unsigned char *to, const unsigned char *from, unsi
     to = net_store_length_fast(to,length);
     ::memcpy(to,from,length);
     return to+length;
+}
+
+std::string get_hostname()
+{
+    char buf[256];
+    if (::gethostname(buf, 255) == -1)
+    {
+        LOG_ERROR(log, "Failed to invoke gethostname()");
+        return "0.0.0.0";
+    }
+    return std::string(buf);
 }
 }// anonymous-namespace
 
@@ -588,16 +601,15 @@ void Slave::register_slave_on_master(MYSQL* mysql)
 {
     uchar buf[1024], *pos= buf;
 
-    unsigned int report_host_len=0, report_user_len=0, report_password_len=0;
+    unsigned int report_user_len=0, report_password_len=0;
 
-    const char * report_host = "0.0.0.0";
+    const std::string report_host = get_hostname();
 
     const char* report_user = "begun_slave";
     const char* report_password = "begun_slave";
     unsigned int report_port = 0;
     unsigned long rpl_recovery_rank = 0;
 
-    report_host_len= strlen(report_host);
     report_user_len= strlen(report_user);
     report_password_len= strlen(report_password);
 
@@ -605,7 +617,7 @@ void Slave::register_slave_on_master(MYSQL* mysql)
 
     int4store(pos, m_server_id);
     pos+= 4;
-    pos= net_store_data(pos, (uchar*)report_host, report_host_len);
+    pos= net_store_data(pos, (uchar*)report_host.c_str(), report_host.size());
     pos= net_store_data(pos, (uchar*)report_user, report_user_len);
     pos= net_store_data(pos, (uchar*)report_password, report_password_len);
     int2store(pos, (unsigned short) report_port);
