@@ -20,6 +20,7 @@
 #include <mysql/my_global.h>
 #undef min
 #undef max
+#undef test
 
 #include <mysql/mysql.h>
 
