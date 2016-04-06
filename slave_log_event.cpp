@@ -491,9 +491,9 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
         unsigned char* row_start = roi.m_rows_buf;
 
         if (should_process(table->m_filter, kind)) {
+            time_stamp start = now();
             while (row_start < roi.m_rows_end &&
                    row_start != NULL) {
-                time_stamp start = now();
                 try
                 {
                     if (bei.type == UPDATE_ROWS_EVENT) {
@@ -511,8 +511,11 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
                     throw;
                 }
                 if (event_stat)
-                    event_stat->tickModifyDone(roi.m_table_id, kind, now() - start);
+                    event_stat->tickModifyRow();
             }
+
+            if (event_stat)
+                event_stat->tickModifyDone(roi.m_table_id, kind, now() - start);
             return;
         }
     }

@@ -221,6 +221,8 @@ public:
     virtual void tickModifyDone(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
     // UPDATE/INSERT/DELETE processed with errors (caught exception).
     virtual void tickModifyFailed(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
+    // UPDATE/INSERT/DELETE rows successfully processed (Modify event may affect several rows of table).
+    virtual void tickModifyRow() {}
 };
 }
 

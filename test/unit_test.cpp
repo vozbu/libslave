@@ -165,6 +165,7 @@ namespace // anonymous
             uint64_t events_xid                = 0;
             uint64_t events_other              = 0;
             uint64_t events_modify             = 0;
+            uint64_t rows_modify               = 0;
 
             struct Counter
             {
@@ -257,6 +258,11 @@ namespace // anonymous
                 map_kind[kind].failed    += time;
                 map_detailed[key].total  += 1;
                 map_detailed[key].failed += time;
+            }
+
+            virtual void tickModifyRow()
+            {
+                ++rows_modify;
             }
         };
 
@@ -1205,6 +1211,7 @@ namespace // anonymous
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                4);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             6);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.rows_modify,               6);
 
         auto sPair = std::make_pair(f.cfg.mysql_db, "test");
         if (f.m_SlaveStat.map_table.find(sPair) == f.m_SlaveStat.map_table.end())
@@ -1321,6 +1328,26 @@ namespace // anonymous
         BOOST_CHECK_LE(f.m_SlaveStat.last_event_master_time, f.m_SlaveStat.last_event_receive_time);
     }
 
+    void testRowsModify()
+    {
+        Fixture f;
+
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+        f.conn->query("INSERT INTO test VALUES (345234),(345235),(345236),(345237)");
+        f.conn->query("UPDATE test SET value=0");
+        f.waitCall();
+
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify, 2);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.rows_modify,   8);
+
+        f.conn->query("DELETE FROM test");
+        f.waitCall();
+
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify, 3);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.rows_modify,   12);
+    }
+
     void test_Stat()
     {
         testStatOneFilter(slave::eAll);
@@ -1337,6 +1364,7 @@ namespace // anonymous
         testXidEvents();
         testMapDetailed();
         testLastEventTime();
+        testRowsModify();
     }
 }// anonymous-namespace
 
