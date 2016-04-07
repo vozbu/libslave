@@ -1045,13 +1045,19 @@ namespace // anonymous
             f.conn->query(sQuery);
             f.waitCall();
 
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              12);
+            if (f.m_Slave.masterVersion() < 50700)
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              12);
+            else
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              16);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_table_map,          2);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_format_description, 1);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,              4);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_rotate,             1);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                2);
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
+            if (f.m_Slave.masterVersion() < 50700)
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
+            else
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              4);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             2);
 
             auto sPair = std::make_pair(f.cfg.mysql_db, "test");
@@ -1203,13 +1209,19 @@ namespace // anonymous
 
         f.waitCall();
 
-        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              24);
+        if (f.m_Slave.masterVersion() < 50700)
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              24);
+        else
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              30);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_table_map,          6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_format_description, 1);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,              6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_rotate,             1);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                4);
-        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
+        if (f.m_Slave.masterVersion() < 50700)
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
+        else
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.rows_modify,               6);
 

@@ -107,10 +107,10 @@ Table_map_event_info::Table_map_event_info(const char* buf, unsigned int event_l
     m_tblnam.assign((const char*)(p_tblen + 1), tblen);
 }
 
-Row_event_info::Row_event_info(const char* buf, unsigned int event_len, bool do_update) {
-
-    if (event_len < LOG_EVENT_HEADER_LEN + ROWS_HEADER_LEN + 2) {
-        LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + ROWS_HEADER_LEN + 2);
+Row_event_info::Row_event_info(const char* buf, unsigned int event_len, bool do_update, bool master_ge_56) {
+    const unsigned int rows_header_len = master_ge_56 ? ROWS_HEADER_LEN : ROWS_HEADER_LEN_V1;
+    if (event_len < LOG_EVENT_HEADER_LEN + rows_header_len + 2) {
+        LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + rows_header_len + 2);
         ::abort();
     }
 
@@ -118,7 +118,7 @@ Row_event_info::Row_event_info(const char* buf, unsigned int event_len, bool do_
 
     m_table_id = uint6korr(buf + LOG_EVENT_HEADER_LEN + RW_MAPID_OFFSET);
 
-    unsigned char* start = (unsigned char*)(buf + LOG_EVENT_HEADER_LEN + ROWS_HEADER_LEN);
+    unsigned char* start = (unsigned char*)(buf + LOG_EVENT_HEADER_LEN + rows_header_len);
 
     m_width = net_field_length(&start);
 
@@ -151,7 +151,10 @@ inline void check_format_description_postlen(unsigned char* b, slave::Log_event_
 }
 
 
-inline void check_format_description(const char* buf, unsigned int event_len) {
+inline void check_format_description(const char* buf, unsigned int event_len, bool master_ge_56) {
+
+    if (master_ge_56)
+        event_len -= BINLOG_CHECKSUM_ALG_DESC_LEN;
 
     buf += LOG_EVENT_MINIMAL_HEADER_LEN;
 
@@ -193,14 +196,20 @@ inline void check_format_description(const char* buf, unsigned int event_len) {
     check_format_description_postlen(event_lens, ROTATE_EVENT, ROTATE_HEADER_LEN);
     check_format_description_postlen(event_lens, FORMAT_DESCRIPTION_EVENT, START_V3_HEADER_LEN + 1 + number_of_event_types);
     check_format_description_postlen(event_lens, TABLE_MAP_EVENT, TABLE_MAP_HEADER_LEN);
-    check_format_description_postlen(event_lens, WRITE_ROWS_EVENT, ROWS_HEADER_LEN);
-    check_format_description_postlen(event_lens, UPDATE_ROWS_EVENT, ROWS_HEADER_LEN);
-    check_format_description_postlen(event_lens, DELETE_ROWS_EVENT, ROWS_HEADER_LEN);
+    check_format_description_postlen(event_lens, WRITE_ROWS_EVENT_V1, ROWS_HEADER_LEN_V1);
+    check_format_description_postlen(event_lens, UPDATE_ROWS_EVENT_V1, ROWS_HEADER_LEN_V1);
+    check_format_description_postlen(event_lens, DELETE_ROWS_EVENT_V1, ROWS_HEADER_LEN_V1);
+    if (master_ge_56)
+    {
+        check_format_description_postlen(event_lens, WRITE_ROWS_EVENT, ROWS_HEADER_LEN);
+        check_format_description_postlen(event_lens, UPDATE_ROWS_EVENT, ROWS_HEADER_LEN);
+        check_format_description_postlen(event_lens, DELETE_ROWS_EVENT, ROWS_HEADER_LEN);
+    }
 
 }
 
 
-bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, EventStatIface* event_stat)
+bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, EventStatIface* event_stat, bool master_ge_56)
 
 {
 
@@ -221,11 +230,14 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
         if (bei.type != FORMAT_DESCRIPTION_EVENT && bei.type != ROTATE_EVENT)
             event_stat->tick(bei.when);
 
+    if (master_ge_56)
+        event_len -= BINLOG_CHECKSUM_LEN;
+
     switch (bei.type) {
 
     case FORMAT_DESCRIPTION_EVENT:
 
-        check_format_description(buf, event_len);
+        check_format_description(buf, event_len, master_ge_56);
 
         if (event_stat)
             event_stat->tickFormatDescription();
@@ -244,6 +256,9 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
         if (event_stat)
             event_stat->tickXid();
         return true;
+    case WRITE_ROWS_EVENT_V1:
+    case UPDATE_ROWS_EVENT_V1:
+    case DELETE_ROWS_EVENT_V1:
     case WRITE_ROWS_EVENT:
     case UPDATE_ROWS_EVENT:
     case DELETE_ROWS_EVENT:
@@ -273,6 +288,14 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
     case EXECUTE_LOAD_QUERY_EVENT:
     case INCIDENT_EVENT:
     case HEARTBEAT_LOG_EVENT:
+    case IGNORABLE_LOG_EVENT:
+    case ROWS_QUERY_LOG_EVENT:
+    case GTID_LOG_EVENT:
+    case ANONYMOUS_GTID_LOG_EVENT:
+    case PREVIOUS_GTIDS_LOG_EVENT:
+    case TRANSACTION_CONTEXT_EVENT:
+    case VIEW_CHANGE_EVENT:
+    case XA_PREPARE_LOG_EVENT:
         if (event_stat)
             event_stat->tickOther();
         return false;
@@ -411,7 +434,7 @@ unsigned char* do_writedelete_row(boost::shared_ptr<slave::Table> table,
     _record_set.when = bei.when;
     _record_set.tbl_name = table->table_name;
     _record_set.db_name = table->database_name;
-    _record_set.type_event = (bei.type == WRITE_ROWS_EVENT ? slave::RecordSet::Write : slave::RecordSet::Delete);
+    _record_set.type_event = (bei.type == WRITE_ROWS_EVENT_V1 || bei.type == WRITE_ROWS_EVENT ? slave::RecordSet::Write : slave::RecordSet::Delete);
     _record_set.master_id = bei.server_id;
 
     table->call_callback(_record_set, ext_state);
@@ -456,9 +479,12 @@ namespace // anonymous
     {
         switch(type)
         {
-        case WRITE_ROWS_EVENT: return eInsert;
-        case UPDATE_ROWS_EVENT: return eUpdate;
-        case DELETE_ROWS_EVENT: return eDelete;
+        case WRITE_ROWS_EVENT_V1:
+        case WRITE_ROWS_EVENT:    return eInsert;
+        case UPDATE_ROWS_EVENT_V1:
+        case UPDATE_ROWS_EVENT:   return eUpdate;
+        case DELETE_ROWS_EVENT_V1:
+        case DELETE_ROWS_EVENT:   return eDelete;
         default: throw std::logic_error("is not processable kind");
         }
     }
@@ -496,7 +522,7 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
                    row_start != NULL) {
                 try
                 {
-                    if (bei.type == UPDATE_ROWS_EVENT) {
+                    if (kind == eUpdate) {
 
                         row_start = do_update_row(table, bei, roi, row_start, ext_state);
 

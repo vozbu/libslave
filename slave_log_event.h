@@ -57,13 +57,35 @@ enum Log_event_type
   PRE_GA_UPDATE_ROWS_EVENT = 21,
   PRE_GA_DELETE_ROWS_EVENT = 22,
 
-  WRITE_ROWS_EVENT = 23,
-  UPDATE_ROWS_EVENT = 24,
-  DELETE_ROWS_EVENT = 25,
+  WRITE_ROWS_EVENT_V1 = 23,
+  UPDATE_ROWS_EVENT_V1 = 24,
+  DELETE_ROWS_EVENT_V1 = 25,
 
   INCIDENT_EVENT = 26,
 
   HEARTBEAT_LOG_EVENT= 27,
+
+  // 5.6 new events
+
+  IGNORABLE_LOG_EVENT = 28,
+  ROWS_QUERY_LOG_EVENT = 29,
+
+  WRITE_ROWS_EVENT = 30,
+  UPDATE_ROWS_EVENT = 31,
+  DELETE_ROWS_EVENT = 32,
+
+  GTID_LOG_EVENT = 33,
+  ANONYMOUS_GTID_LOG_EVENT = 34,
+
+  PREVIOUS_GTIDS_LOG_EVENT = 35,
+
+  // 5.7 new events
+
+  TRANSACTION_CONTEXT_EVENT= 36,
+
+  VIEW_CHANGE_EVENT= 37,
+
+  XA_PREPARE_LOG_EVENT= 38,
 
   ENUM_END_EVENT
 };
@@ -89,9 +111,9 @@ enum Log_event_type
 #define TABLE_MAP_HEADER_LEN   8
 #define TM_MAPID_OFFSET    0
 
-#define ROWS_HEADER_LEN        8
+#define ROWS_HEADER_LEN_V1     8
 #define RW_MAPID_OFFSET    0
-#define ROWS_HEADER_LEN        8
+#define ROWS_HEADER_LEN        10
 
 #define LOG_EVENT_MINIMAL_HEADER_LEN 19
 
@@ -103,6 +125,9 @@ enum Log_event_type
 #define ST_COMMON_HEADER_LEN_OFFSET (ST_CREATED_OFFSET + 4)
 
 #define START_V3_HEADER_LEN     (2 + ST_SERVER_VER_LEN + 4)
+
+#define BINLOG_CHECKSUM_LEN           4
+#define BINLOG_CHECKSUM_ALG_DESC_LEN  1
 
 
 //-----------------------------------------------------------------------------------------
@@ -161,11 +186,11 @@ struct Row_event_info {
 
     bool has_after_image;
 
-    Row_event_info(const char* buf, unsigned int event_len, bool do_update);
+    Row_event_info(const char* buf, unsigned int event_len, bool do_update, bool master_ge_56);
 };
 
 
-bool read_log_event(const char* buf, unsigned int event_len, Basic_event_info& info, EventStatIface* event_stat);
+bool read_log_event(const char* buf, unsigned int event_len, Basic_event_info& info, EventStatIface* event_stat, bool master_ge_56);
 
 void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, const Row_event_info& roi, ExtStateIface &ext_state, EventStatIface* event_stat);
 
