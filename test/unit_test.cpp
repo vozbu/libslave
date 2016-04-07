@@ -361,6 +361,7 @@ namespace // anonymous
 
             conn.reset(new nanomysql::Connection(cfg.mysql_host, cfg.mysql_user, cfg.mysql_pass, cfg.mysql_db));
             conn->query("set names utf8");
+            conn->query("set time_zone='+3:00'");
             // Create table, because if it does not exist, libslave will swear the lack of it, and test will finished.
             conn->query("CREATE TABLE IF NOT EXISTS test (tmp int)");
             // Create another table for testing map_detailed stat.
@@ -836,7 +837,12 @@ namespace // anonymous
         MYSQL_TEXT,
         MYSQL_DECIMAL,
         MYSQL_BIT,
-        MYSQL_SET
+        MYSQL_SET,
+        MYSQL_TIMESTAMP,
+        MYSQL_TIME,
+        MYSQL_DATETIME,
+        MYSQL_DATE,
+        MYSQL_YEAR
     };
 
     template <MYSQL_TYPE T>
@@ -913,6 +919,46 @@ namespace // anonymous
         static const std::string name;
     };
     const std::string MYSQL_type_traits<MYSQL_SET>::name = "SET";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_TIMESTAMP>
+    {
+        typedef slave::types::MY_TIMESTAMP slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_TIMESTAMP>::name = "TIMESTAMP";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_TIME>
+    {
+        typedef slave::types::MY_TIME slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_TIME>::name = "TIME";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_DATETIME>
+    {
+        typedef slave::types::MY_DATETIME slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_DATETIME>::name = "DATETIME";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_DATE>
+    {
+        typedef slave::types::MY_DATE slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_DATE>::name = "DATE";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_YEAR>
+    {
+        typedef slave::types::MY_TINYINT slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_YEAR>::name = "YEAR";
 
     template <typename T>
     void getValue(const std::string& s, T& t)
@@ -1016,6 +1062,11 @@ namespace // anonymous
         testOneType<boost::mpl::int_<MYSQL_DECIMAL>>(f);
         testOneType<boost::mpl::int_<MYSQL_BIT>>(f);
         testOneType<boost::mpl::int_<MYSQL_SET>>(f);
+        testOneType<boost::mpl::int_<MYSQL_TIMESTAMP>>(f);
+        testOneType<boost::mpl::int_<MYSQL_TIME>>(f);
+        testOneType<boost::mpl::int_<MYSQL_DATETIME>>(f);
+        testOneType<boost::mpl::int_<MYSQL_DATE>>(f);
+        testOneType<boost::mpl::int_<MYSQL_YEAR>>(f);
     }
 
     void testStatOneFilter(slave::EventKind filter)
