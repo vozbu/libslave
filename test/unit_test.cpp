@@ -340,7 +340,11 @@ namespace // anonymous
 
             // Run libslave with our custom stop-function, which also signals
             // when slave has read binlog position and is ready to get messages.
-            m_SlaveThread = boost::thread([this] () { m_Slave.get_remote_binlog(std::ref(m_StopFlag)); });
+            m_SlaveThread = boost::thread([this] ()
+            {
+                m_Slave.get_remote_binlog(std::ref(m_StopFlag));
+                mysql_thread_end();
+            });
 
             // Wait libslave to run - no more than 1000 times with 1 ms.
             const timespec ts = {0 , 1000000};
@@ -770,7 +774,11 @@ namespace // anonymous
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
         }
 
-        f.m_SlaveThread = boost::thread([&f, sCurBinlogPos] () { f.m_Slave.get_remote_binlog(CheckBinlogPos(f.m_Slave, sCurBinlogPos)); });
+        f.m_SlaveThread = boost::thread([&f, sCurBinlogPos] ()
+        {
+            f.m_Slave.get_remote_binlog(CheckBinlogPos(f.m_Slave, sCurBinlogPos));
+            mysql_thread_end();
+        });
 
         // Wait callback triggering no more than 1 second.
         const timespec ts = {0 , 1000000};
