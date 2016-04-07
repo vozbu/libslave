@@ -1429,6 +1429,103 @@ namespace // anonymous
         testLastEventTime();
         testRowsModify();
     }
+
+    struct CallbackRowImage
+    {
+        CallbackRowImage() { reset(); }
+
+        void operator() (const slave::RecordSet& rs)
+        {
+            if (not rs.m_old_row.empty())
+            {
+                old_row_empty = false;
+                auto it = rs.m_old_row.find("id");
+                if (it != rs.m_old_row.end())
+                    id_old = boost::any_cast<uint32_t>(it->second.second);
+
+                it = rs.m_old_row.find("value");
+                if (it != rs.m_old_row.end())
+                    value_old = boost::any_cast<uint32_t>(it->second.second);
+            }
+            auto it = rs.m_row.find("id");
+            if (it != rs.m_row.end())
+                id = boost::any_cast<uint32_t>(it->second.second);
+
+            it = rs.m_row.find("value");
+            if (it != rs.m_row.end())
+                value = boost::any_cast<uint32_t>(it->second.second);
+        }
+
+        void reset()
+        {
+            old_row_empty = true;
+            id_old = value_old = id = value = 0;
+        }
+
+        bool old_row_empty;
+        uint32_t id_old;
+        uint32_t value_old;
+        uint32_t id;
+        uint32_t value;
+    };
+
+    void test_BinlogRowImageOption()
+    {
+        Fixture f;
+
+        bool row_image_minimal = false;
+        if (f.m_Slave.masterVersion() >= 50602)
+        {
+            f.conn->query("SELECT @@GLOBAL.binlog_row_image as binlog_row_image");
+            f.conn->use([&row_image_minimal](const nanomysql::fields_t& row)
+            {
+                row_image_minimal = row.at("binlog_row_image").data == "MINIMAL";
+            });
+        }
+
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (id int, value int, PRIMARY KEY(id))");
+
+        CallbackRowImage sCallback;
+        f.m_Callback.setCallback(std::ref(sCallback));
+
+        f.conn->query("INSERT INTO test VALUES (1, 345234)");
+        f.waitCall();
+        BOOST_CHECK_EQUAL(sCallback.old_row_empty, true);
+        BOOST_CHECK_EQUAL(sCallback.id,    1);
+        BOOST_CHECK_EQUAL(sCallback.value, 345234);
+        sCallback.reset();
+
+        f.conn->query("UPDATE test SET value=132133 WHERE id=1");
+        f.waitCall();
+        BOOST_CHECK_EQUAL(sCallback.old_row_empty, false);
+        BOOST_CHECK_EQUAL(sCallback.id_old,    1);
+        if (not row_image_minimal)
+        {
+            BOOST_CHECK_EQUAL(sCallback.value_old, 345234);
+            BOOST_CHECK_EQUAL(sCallback.id,        1);
+        }
+        else
+        {
+            BOOST_CHECK_EQUAL(sCallback.value_old, 0);
+            BOOST_CHECK_EQUAL(sCallback.id,        0);
+        }
+        BOOST_CHECK_EQUAL(sCallback.value,     132133);
+        sCallback.reset();
+
+        f.conn->query("DELETE FROM test WHERE id=1");
+        f.waitCall();
+        BOOST_CHECK_EQUAL(sCallback.old_row_empty, true);
+        BOOST_CHECK_EQUAL(sCallback.id,        1);
+        if (not row_image_minimal)
+            BOOST_CHECK_EQUAL(sCallback.value,     132133);
+        else
+            BOOST_CHECK_EQUAL(sCallback.value,     0);
+
+        f.m_Callback.setCallback();
+        if (0 != f.m_Callback.m_UnwantedCalls)
+            BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
+    }
 }// anonymous-namespace
 
 test_suite* init_unit_test_suite(int argc, char* argv[])
@@ -1441,6 +1538,7 @@ test_suite* init_unit_test_suite(int argc, char* argv[])
     ADD_FIXTURE_TEST(test_SetBinlogPos);
     ADD_FIXTURE_TEST(test_Disconnect);
     ADD_FIXTURE_TEST(test_Stat);
+    ADD_FIXTURE_TEST(test_BinlogRowImageOption);
 
 #undef ADD_FIXTURE_TEST
 

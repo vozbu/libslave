@@ -372,12 +372,10 @@ unsigned char* unpack_row(boost::shared_ptr<slave::Table> table,
                           slave::Row& _row,
                           unsigned int colcnt,
                           unsigned char* row,
-                          const std::vector<unsigned char>& cols,
-                          const std::vector<unsigned char>& cols_ai)
+                          const std::vector<unsigned char>& cols)
 {
 
-    LOG_TRACE(log, "Unpacking row: " << table->fields.size() << "," << colcnt << "," << cols.size()
-              << "," << cols_ai.size());
+    LOG_TRACE(log, "Unpacking row: " << table->fields.size() << "," << colcnt << "," << cols.size());
 
     if (colcnt != table->fields.size()) {
         LOG_ERROR(log, "Field count mismatch in unpacking row for "
@@ -406,12 +404,6 @@ unsigned char* unpack_row(boost::shared_ptr<slave::Table> table,
         if (!(cols[i / 8] & (1 << (i & 7)))) {
 
             LOG_TRACE(log, "field " << field->getFieldName() << " is not in column list.");
-            continue;
-        }
-
-        if (cols_ai.size() && !(cols_ai[i / 8] & (1 << (i & 7)))) {
-
-            LOG_TRACE(log, "field " << field->getFieldName() << " is not in the update after-image.");
             continue;
         }
 
@@ -453,7 +445,7 @@ unsigned char* do_writedelete_row(boost::shared_ptr<slave::Table> table,
 
     slave::RecordSet _record_set;
 
-    unsigned char* t = unpack_row(table, _record_set.m_row, roi.m_width, row_start, roi.m_cols, roi.m_cols_ai);
+    unsigned char* t = unpack_row(table, _record_set.m_row, roi.m_width, row_start, roi.m_cols);
 
     if (t == NULL) {
         return NULL;
@@ -478,13 +470,13 @@ unsigned char* do_update_row(boost::shared_ptr<slave::Table> table,
 
     slave::RecordSet _record_set;
 
-    unsigned char* t = unpack_row(table, _record_set.m_old_row, roi.m_width, row_start, roi.m_cols, roi.m_cols_ai);
+    unsigned char* t = unpack_row(table, _record_set.m_old_row, roi.m_width, row_start, roi.m_cols);
 
     if (t == NULL) {
         return NULL;
     }
 
-    t = unpack_row(table, _record_set.m_row, roi.m_width, t, roi.m_cols, roi.m_cols_ai);
+    t = unpack_row(table, _record_set.m_row, roi.m_width, t, roi.m_cols_ai);
 
     if (t == NULL) {
         return NULL;
