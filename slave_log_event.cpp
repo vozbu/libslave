@@ -24,6 +24,8 @@
 
 #include <mysql/mysql.h>
 
+#include <zlib.h>
+
 #include "relayloginfo.h"
 #include "slave_log_event.h"
 
@@ -153,9 +155,6 @@ inline void check_format_description_postlen(unsigned char* b, slave::Log_event_
 
 inline void check_format_description(const char* buf, unsigned int event_len, bool master_ge_56) {
 
-    if (master_ge_56)
-        event_len -= BINLOG_CHECKSUM_ALG_DESC_LEN;
-
     buf += LOG_EVENT_MINIMAL_HEADER_LEN;
 
     uint16_t binlog_version;
@@ -209,7 +208,13 @@ inline void check_format_description(const char* buf, unsigned int event_len, bo
 }
 
 
-bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, EventStatIface* event_stat, bool master_ge_56)
+inline uint32_t checksum_crc32(uint32_t crc, const unsigned char* pos, size_t length)
+{
+    return static_cast<uint32_t>(::crc32(static_cast<unsigned int>(crc), pos, static_cast<unsigned int>(length)));
+}
+
+
+bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, EventStatIface* event_stat, bool master_ge_56, MasterInfo& master_info)
 
 {
 
@@ -226,17 +231,40 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
         ::abort();
     }
 
+    if (master_ge_56 && bei.type == FORMAT_DESCRIPTION_EVENT)
+    {
+        enum_binlog_checksum_alg alg = static_cast<enum_binlog_checksum_alg>(*(buf + event_len - BINLOG_CHECKSUM_LEN - BINLOG_CHECKSUM_ALG_DESC_LEN));
+        if (alg == BINLOG_CHECKSUM_ALG_OFF || alg == BINLOG_CHECKSUM_ALG_CRC32)
+            master_info.checksum_alg = alg;
+    }
+
+    if (master_info.checksumEnabled())
+    {
+        uint32_t incoming;
+        ::memcpy(&incoming, buf + event_len - BINLOG_CHECKSUM_LEN, sizeof(incoming));
+        incoming = le32toh(incoming);
+
+        uint32_t computed = checksum_crc32(0L, nullptr, 0);
+        computed = checksum_crc32(computed, (const unsigned char*)buf, event_len - BINLOG_CHECKSUM_LEN);
+
+        if (incoming != computed)
+        {
+            LOG_ERROR(log, "CRC32 check failed: incoming (" << incoming << ") != computed (" << computed << ")");
+            ::abort();
+        }
+        bei.event_len -= BINLOG_CHECKSUM_LEN;
+    }
+
     if (event_stat)
         if (bei.type != FORMAT_DESCRIPTION_EVENT && bei.type != ROTATE_EVENT)
             event_stat->tick(bei.when);
-
-    if (master_ge_56)
-        event_len -= BINLOG_CHECKSUM_LEN;
 
     switch (bei.type) {
 
     case FORMAT_DESCRIPTION_EVENT:
 
+        if (master_ge_56)
+            event_len -= (BINLOG_CHECKSUM_ALG_DESC_LEN + BINLOG_CHECKSUM_LEN);
         check_format_description(buf, event_len, master_ge_56);
 
         if (event_stat)

@@ -21,6 +21,7 @@
 
 #include "nanomysql.h"
 
+#include <mysql/mysqld_error.h>
 #include <mysql/my_global.h>
 #include <mysql/m_ctype.h>
 #include <mysql/sql_common.h>
@@ -66,6 +67,28 @@ std::string get_hostname()
     }
     return std::string(buf);
 }
+
+const char* binlog_checksum_type_names[] =
+{
+    "NONE",
+    "CRC32",
+    nullptr
+};
+
+unsigned int binlog_checksum_type_length[] =
+{
+    sizeof("NONE") - 1,
+    sizeof("CRC32") - 1,
+    0
+};
+
+TYPELIB binlog_checksum_typelib =
+{
+    array_elements(binlog_checksum_type_names) - 1, "",
+    binlog_checksum_type_names,
+    binlog_checksum_type_length
+};
+
 }// anonymous-namespace
 
 
@@ -399,6 +422,7 @@ void Slave::get_remote_binlog( const boost::function< bool() >& _interruptFlag)
     register_slave_on_master(&mysql);
 
 connected:
+    do_checksum_handshake(&mysql);
 
     // Get binlog position saved in ext_state before, or load it
     // from persistent storage. Get false if failed to get binlog position.
@@ -482,7 +506,8 @@ connected:
                                        len - 1,
                                        event,
                                        event_stat,
-                                       masterGe56())) {
+                                       masterGe56(),
+                                       m_master_info)) {
 
                 LOG_TRACE(log, "Skipping unknown event.");
                 continue;
@@ -718,6 +743,38 @@ void Slave::check_master_binlog_format()
 
 
     throw std::runtime_error("Slave::check_binlog_format(): Could not SHOW GLOBAL VARIABLES LIKE 'binlog_format'");
+}
+
+void Slave::do_checksum_handshake(MYSQL* mysql)
+{
+    const char query[] = "SET @master_binlog_checksum= @@global.binlog_checksum";
+
+    if (mysql_real_query(mysql, query, static_cast<ulong>(strlen(query))))
+    {
+        if (mysql_errno(mysql) != ER_UNKNOWN_SYSTEM_VARIABLE)
+            throw std::runtime_error("Slave::do_checksum_handshake(MYSQL* mysql): query 'SET @master_binlog_checksum= @@global.binlog_checksum' failed");
+        mysql_free_result(mysql_store_result(mysql));
+    }
+    else
+    {
+        mysql_free_result(mysql_store_result(mysql));
+        MYSQL_RES* master_res = nullptr;
+        MYSQL_ROW master_row = nullptr;
+        const char select_query[] = "SELECT @master_binlog_checksum";
+
+        if (!mysql_real_query(mysql, select_query, static_cast<ulong>(strlen(select_query))) &&
+            (master_res = mysql_store_result(mysql)) &&
+            (master_row = mysql_fetch_row(master_res)) &&
+            (master_row[0] != NULL))
+        {
+            m_master_info.checksum_alg = static_cast<enum_binlog_checksum_alg>(find_type(master_row[0], &binlog_checksum_typelib, 1) - 1);
+        }
+
+        if (m_master_info.checksum_alg != BINLOG_CHECKSUM_ALG_OFF && m_master_info.checksum_alg != BINLOG_CHECKSUM_ALG_CRC32)
+            throw std::runtime_error("Slave::do_checksum_handshake(MYSQL* mysql): unknown checksum algorithm");
+    }
+
+    LOG_TRACE(log, "Success doing checksum handshake");
 }
 
 

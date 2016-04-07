@@ -35,6 +35,14 @@
 namespace slave
 {
 
+enum enum_binlog_checksum_alg
+{
+    BINLOG_CHECKSUM_ALG_OFF = 0,
+    BINLOG_CHECKSUM_ALG_CRC32 = 1,
+    BINLOG_CHECKSUM_ALG_ENUM_END,
+    BINLOG_CHECKSUM_ALG_UNDEF = 255
+};
+
 struct MasterInfo {
 
     std::string host;
@@ -44,6 +52,7 @@ struct MasterInfo {
     std::string master_log_name;
     unsigned long master_log_pos;
     unsigned int connect_retry;
+    enum_binlog_checksum_alg checksum_alg = BINLOG_CHECKSUM_ALG_OFF;
 
     MasterInfo() : port(3306), master_log_pos(0), connect_retry(10) {}
 
@@ -57,6 +66,8 @@ struct MasterInfo {
         master_log_pos(0),
         connect_retry(connect_retry_)
         {}
+
+    bool checksumEnabled() const { return checksum_alg == BINLOG_CHECKSUM_ALG_CRC32; }
 };
 
 struct State {

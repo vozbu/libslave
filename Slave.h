@@ -167,6 +167,7 @@ protected:
 
     void register_slave_on_master(MYSQL* mysql);
     void deregister_slave_on_master(MYSQL* mysql);
+    void do_checksum_handshake(MYSQL* mysql);
 
     void generateSlaveId();
 
