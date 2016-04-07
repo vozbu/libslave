@@ -208,10 +208,20 @@ void Slave::createTable(RelayLogInfo& rli,
             field = PtrField(new Field_float(name, type));
 
         else if (extract_field == "timestamp")
-            field = PtrField(new Field_timestamp(name, type));
+        {
+            if (m_master_version < 50604)
+                field = PtrField(new Field_timestamp_55(name, type));
+            else
+                field = PtrField(new Field_timestamp_56(name, type));
+        }
 
         else if (extract_field == "datetime")
-            field = PtrField(new Field_datetime(name, type));
+        {
+            if (m_master_version < 50604)
+                field = PtrField(new Field_datetime_55(name, type));
+            else
+                field = PtrField(new Field_datetime_56(name, type));
+        }
 
         else if (extract_field == "date")
             field = PtrField(new Field_date(name, type));
@@ -220,7 +230,12 @@ void Slave::createTable(RelayLogInfo& rli,
             field = PtrField(new Field_year(name, type));
 
         else if (extract_field == "time")
-            field = PtrField(new Field_time(name, type));
+        {
+            if (m_master_version < 50604)
+                field = PtrField(new Field_time_55(name, type));
+            else
+                field = PtrField(new Field_time_56(name, type));
+        }
 
         else if (extract_field == "enum")
             field = PtrField(new Field_enum(name, type));

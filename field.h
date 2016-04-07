@@ -140,10 +140,17 @@ public:
     const char* unpack(const char* from);
 };
 
-class Field_timestamp: public Field_str {
+class Field_timestamp_55: public Field_str {
     unsigned int pack_length() const { return 4; }
 public:
-    Field_timestamp(const std::string& field_name_arg, const std::string& type);
+    Field_timestamp_55(const std::string& field_name_arg, const std::string& type);
+
+    const char* unpack(const char* from);
+};
+
+class Field_timestamp_56: public Field_longstr {
+public:
+    Field_timestamp_56(const std::string& field_name_arg, const std::string& type);
 
     const char* unpack(const char* from);
 };
@@ -161,19 +168,34 @@ public:
     const char* unpack(const char* from);
 };
 
-class Field_time: public Field_str {
+class Field_time_55: public Field_str {
     unsigned int pack_length() const { return 3; }
 public:
 
-    Field_time(const std::string& field_name_arg, const std::string& type);
+    Field_time_55(const std::string& field_name_arg, const std::string& type);
 
     const char* unpack(const char* from);
 };
 
-class Field_datetime: public Field_str {
+class Field_time_56: public Field_longstr {
+public:
+
+    Field_time_56(const std::string& field_name_arg, const std::string& type);
+
+    const char* unpack(const char* from);
+};
+
+class Field_datetime_55: public Field_str {
     unsigned int pack_length() const { return 8; }
 public:
-    Field_datetime(const std::string& field_name_arg, const std::string& type);
+    Field_datetime_55(const std::string& field_name_arg, const std::string& type);
+
+    const char* unpack(const char* from);
+};
+
+class Field_datetime_56: public Field_longstr {
+public:
+    Field_datetime_56(const std::string& field_name_arg, const std::string& type);
 
     const char* unpack(const char* from);
 };

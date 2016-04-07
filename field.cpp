@@ -139,12 +139,58 @@ const char* Field_float::unpack(const char* from) {
 Field_str::Field_str(const std::string& field_name_arg, const std::string& type):
     Field(field_name_arg, type) {}
 
-Field_timestamp::Field_timestamp(const std::string& field_name_arg, const std::string& type):
+Field_timestamp_55::Field_timestamp_55(const std::string& field_name_arg, const std::string& type):
     Field_str(field_name_arg, type) {}
 
-const char* Field_timestamp::unpack(const char* from) {
+const char* Field_timestamp_55::unpack(const char* from) {
 
     uint32 tmp = uint4korr(from);
+    field_data = tmp;
+
+    LOG_TRACE(log, "  timestamp: " << tmp << " // " << pack_length());
+
+    return from + pack_length();
+}
+
+Field_timestamp_56::Field_timestamp_56(const std::string& field_name_arg, const std::string& type):
+    Field_longstr(field_name_arg, type) {
+
+    int digits = 0;
+    sscanf(type.c_str(), "timestamp(%d)", &digits);
+    switch (digits)
+    {
+    case 0:
+        field_length = 4;
+        break;
+    case 1:
+    case 2:
+        field_length = 5;
+        break;
+    case 3:
+    case 4:
+        field_length = 6;
+        break;
+    case 5:
+    case 6:
+        field_length = 7;
+        break;
+    default:
+        throw std::runtime_error(
+            "Field_timestamp_56: unknown Fractional Seconds Precision in field '" + field_name_arg + "': '" + type + "'."
+        );
+    }
+}
+
+const char* Field_timestamp_56::unpack(const char* from) {
+
+    // !! we ignore fractional part
+    // 4 bytes + fractional-seconds storage, big endian
+    // same as before 5.6.4, except big endian rather than little endian
+
+    uint32 tmp = 0;
+    for (unsigned int i = 0; i < 4; ++i)
+        *((unsigned char *)&tmp + 3 - i) = *(from + i);
+
     field_data = tmp;
 
     LOG_TRACE(log, "  timestamp: " << tmp << " // " << pack_length());
@@ -155,12 +201,79 @@ const char* Field_timestamp::unpack(const char* from) {
 Field_year::Field_year(const std::string& field_name_arg, const std::string& type):
     Field_tiny(field_name_arg, type) {}
 
-Field_datetime::Field_datetime(const std::string& field_name_arg, const std::string& type):
+Field_datetime_55::Field_datetime_55(const std::string& field_name_arg, const std::string& type):
     Field_str(field_name_arg, type) {}
 
-const char* Field_datetime::unpack(const char* from) {
+const char* Field_datetime_55::unpack(const char* from) {
 
     ulonglong tmp = uint8korr(from);
+    field_data = tmp;
+
+    LOG_TRACE(log, "  datetime: " << tmp << " // " << pack_length());
+
+    return from + pack_length();
+}
+
+Field_datetime_56::Field_datetime_56(const std::string& field_name_arg, const std::string& type):
+    Field_longstr(field_name_arg, type) {
+
+    int digits = 0;
+    sscanf(type.c_str(), "datetime(%d)", &digits);
+    switch (digits)
+    {
+    case 0:
+        field_length = 5;
+        break;
+    case 1:
+    case 2:
+        field_length = 6;
+        break;
+    case 3:
+    case 4:
+        field_length = 7;
+        break;
+    case 5:
+    case 6:
+        field_length = 8;
+        break;
+    default:
+        throw std::runtime_error(
+            "Field_datetime_56: unknown Fractional Seconds Precision in field '" + field_name_arg + "': '" + type + "'."
+        );
+    }
+}
+
+const char* Field_datetime_56::unpack(const char* from) {
+
+    // !! we ignore fractional part
+    // 5 bytes + fractional-seconds storage, big endian
+    // ---------------------------
+    //  1 bit  sign           (1= non-negative, 0= negative)
+    // 17 bits year*13+month  (year 0-9999, month 0-12)
+    //  5 bits day            (0-31)
+    //  5 bits hour           (0-23)
+    //  6 bits minute         (0-59)
+    //  6 bits second         (0-59)
+    // ---------------------------
+    // 40 bits = 5 bytes
+
+    ulonglong data;
+    for (unsigned int i = 0; i < 5; ++i)
+        *((unsigned char *)&data + 4 - i) = *(from + i);
+
+    ulonglong tmp = data & 63;
+    data >>= 6;
+    tmp += (data & 63) * 100;
+    data >>= 6;
+    tmp += (data & 31) * 10000;
+    data >>= 5;
+    tmp += (data & 31) * 1000000;
+    data >>= 5;
+
+    ulonglong year_month = data & ((1 << 17) - 1);
+    tmp += year_month % 13 * 100000000;
+    tmp += year_month / 13 * 10000000000;
+
     field_data = tmp;
 
     LOG_TRACE(log, "  datetime: " << tmp << " // " << pack_length());
@@ -181,12 +294,76 @@ const char* Field_date::unpack(const char* from) {
     return from + pack_length();
 }
 
-Field_time::Field_time(const std::string& field_name_arg, const std::string& type):
+Field_time_55::Field_time_55(const std::string& field_name_arg, const std::string& type):
     Field_str(field_name_arg, type) {}
 
-const char* Field_time::unpack(const char* from) {
+const char* Field_time_55::unpack(const char* from) {
 
-    uint32 tmp = uint3korr(from);
+    int32 tmp = sint3korr(from);
+    field_data = tmp;
+
+    LOG_TRACE(log, "  time: " << tmp << " // " << pack_length());
+
+    return from + pack_length();
+}
+
+Field_time_56::Field_time_56(const std::string& field_name_arg, const std::string& type):
+    Field_longstr(field_name_arg, type) {
+
+    int digits = 0;
+    sscanf(type.c_str(), "time(%d)", &digits);
+    switch (digits)
+    {
+    case 0:
+        field_length = 3;
+        break;
+    case 1:
+    case 2:
+        field_length = 4;
+        break;
+    case 3:
+    case 4:
+        field_length = 5;
+        break;
+    case 5:
+    case 6:
+        field_length = 6;
+        break;
+    default:
+        throw std::runtime_error(
+            "Field_time_56: unknown Fractional Seconds Precision in field '" + field_name_arg + "': '" + type + "'."
+        );
+    }
+}
+
+const char* Field_time_56::unpack(const char* from) {
+
+    // !! we ignore fractional part
+    // 3 bytes + fractional-seconds storage, big endian
+    // ---------------------
+    //  1 bit sign    (1= non-negative, 0= negative)
+    //  1 bit unused  (reserved for future extensions)
+    // 10 bits hour   (0-838)
+    //  6 bits minute (0-59)
+    //  6 bits second (0-59)
+    // ---------------------
+    // 24 bits = 3 bytes
+
+    uint32 data = 0;
+    for (unsigned int i = 0; i < 3; ++i)
+        *((unsigned char *)&data + 2 - i) = *(from + i);
+
+    uint32 sign = (uint32)((data & (1 << 23)) >> 23);
+    if (sign == 0)
+        data = (1 << 23) - data;
+    int32 tmp = data & 63;
+    data >>= 6;
+    tmp += (data & 63) * 100;
+    data >>= 6;
+    tmp += (data & 1023) * 10000;
+    if (sign == 0)
+        tmp = -tmp;
+
     field_data = tmp;
 
     LOG_TRACE(log, "  time: " << tmp << " // " << pack_length());
