@@ -17,6 +17,9 @@ master's data on the client server.
 Features
 -------------------------------------------------------------------
 * Statistics of rps and time of every event in every table.
+* Support for mysql options:
+  * binlog_checksum=(NONE,CRC32)
+  * binlog_row_image=(full,minimal)
 
 USAGE
 ===================================================================
@@ -26,9 +29,11 @@ Build requirements
 
 For building the library, you will need:
 
- * g++ with C+11 support
+ * g++ with C++11 support.
 
- * The standard mysql C client libraries (libmysqlclient).
+ * The standard mysql C client libraries (libmysqlclient):
+   * for 5.6-5.7 versions you will need place **hash.h** from mysql repo
+     into your mysql include directory.
 
  * The headers of the boost libraries (http://www.boost.org).
    At the minimum, you will need at least the shared_ptr.hpp, function.hpp,
@@ -43,7 +48,7 @@ For building the library, you will need:
 
 Usage requirements
 -------------------------------------------------------------------
- * Requires >= Mysql 5.1.23 and < Mysql 5.6.0. Tested only with some of the 5.1 and 5.5
+ * Requires >= Mysql 5.1.23 and <= Mysql 5.7.12. Tested with some of the 5.1, 5.5, 5.6, 5.7
    versions of mysql servers.
 
 Compiling
@@ -78,7 +83,7 @@ CREDITS
 
 https://github.com/Begun/libslave
 
-(c) 2015, "Mail.Ru Group" LLC
+(c) 2016, "Mail.Ru Group" LLC
 
 https://github.com/vozbu/libslave
 
