@@ -752,7 +752,10 @@ void Slave::do_checksum_handshake(MYSQL* mysql)
     if (mysql_real_query(mysql, query, static_cast<ulong>(strlen(query))))
     {
         if (mysql_errno(mysql) != ER_UNKNOWN_SYSTEM_VARIABLE)
+        {
+            mysql_free_result(mysql_store_result(mysql));
             throw std::runtime_error("Slave::do_checksum_handshake(MYSQL* mysql): query 'SET @master_binlog_checksum= @@global.binlog_checksum' failed");
+        }
         mysql_free_result(mysql_store_result(mysql));
     }
     else
@@ -769,6 +772,9 @@ void Slave::do_checksum_handshake(MYSQL* mysql)
         {
             m_master_info.checksum_alg = static_cast<enum_binlog_checksum_alg>(find_type(master_row[0], &binlog_checksum_typelib, 1) - 1);
         }
+
+        if (master_res)
+            mysql_free_result(master_res);
 
         if (m_master_info.checksum_alg != BINLOG_CHECKSUM_ALG_OFF && m_master_info.checksum_alg != BINLOG_CHECKSUM_ALG_CRC32)
             throw std::runtime_error("Slave::do_checksum_handshake(MYSQL* mysql): unknown checksum algorithm");
