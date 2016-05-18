@@ -18,7 +18,10 @@ FIND_PACKAGE (Boost 1.41.0 COMPONENTS unit_test_framework thread system)
 
 INCLUDE (FindPackageHandleStandardArgs)
 FIND_PATH (IMYSQL mysql/mysql.h)
-FIND_LIBRARY (LMYSQLCLIENT_R NAMES mysqlclient_r mysqlclient PATH_SUFFIXES mysql)
+FIND_LIBRARY (LMYSQLCLIENT_R NAMES libmysqlclient_r.a
+                                   libmysqlclient.a
+                                   libmysqlclient_r.so
+                                   libmysqlclient.so PATH_SUFFIXES mysql)
 SET (Mysql_FIND_REQUIRED YES)
 FIND_PACKAGE_HANDLE_STANDARD_ARGS(Mysql DEFAULT_MSG IMYSQL LMYSQLCLIENT_R)
 INCLUDE_DIRECTORIES ("${IMYSQL}/mysql")
