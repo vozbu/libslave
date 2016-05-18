@@ -111,7 +111,7 @@ int bin2dec(const char *from, decimal_t *to, int precision, int scale)
     if (intg0x)
     {
         int i=dig2bytes[intg0x];
-        dec1 UNINIT_VAR(x);
+        dec1 x = 0;
         switch (i)
         {
             case 1: x=mi_sint1korr(from); break;
@@ -152,7 +152,7 @@ int bin2dec(const char *from, decimal_t *to, int precision, int scale)
     if (frac0x)
     {
         int i=dig2bytes[frac0x];
-        dec1 UNINIT_VAR(x);
+        dec1 x = 0;
         switch (i)
         {
             case 1: x=mi_sint1korr(from); break;
@@ -166,14 +166,12 @@ int bin2dec(const char *from, decimal_t *to, int precision, int scale)
             goto err;
         buf++;
     }
-    my_afree(d_copy);
 
     if (to->intg == 0 && to->frac == 0)
         decimal_make_zero(to);
     return error;
 
 err:
-    my_afree(d_copy);
     decimal_make_zero(to);
     return(E_DEC_BAD_NUM);
 }

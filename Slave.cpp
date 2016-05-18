@@ -21,6 +21,7 @@
 
 #include "nanomysql.h"
 
+#include <mysql/errmsg.h>
 #include <mysql/mysqld_error.h>
 #include <mysql/my_global.h>
 #include <mysql/m_ctype.h>
@@ -969,7 +970,11 @@ ulong Slave::read_event(MYSQL* mysql)
     ulong len;
     ext_state.setStateProcessing(false);
 
+#if MYSQL_VERSION_ID < 50705
     len = cli_safe_read(mysql);
+#else
+    len = cli_safe_read(mysql, nullptr);
+#endif
 
     if (len == packet_error) {
         LOG_ERROR(log, "Myslave: Error reading packet from server: " << mysql_error(mysql)
