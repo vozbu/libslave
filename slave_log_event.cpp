@@ -107,6 +107,11 @@ Table_map_event_info::Table_map_event_info(const char* buf, unsigned int event_l
     size_t tblen = *(p_tblen);
 
     m_tblnam.assign((const char*)(p_tblen + 1), tblen);
+
+    unsigned char* p_width = p_tblen + tblen + 2;
+    unsigned long width = net_field_length(&p_width);
+
+    m_cols_types.assign(p_width, p_width + width);
 }
 
 Row_event_info::Row_event_info(const char* buf, unsigned int event_len, bool do_update, bool master_ge_56) {

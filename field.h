@@ -140,18 +140,21 @@ public:
     const char* unpack(const char* from);
 };
 
-class Field_timestamp_55: public Field_str {
-    unsigned int pack_length() const { return 4; }
+class Field_temporal: public Field_longstr {
+protected:
+    bool is_old_storage;
 public:
-    Field_timestamp_55(const std::string& field_name_arg, const std::string& type);
+    Field_temporal(const std::string& field_name_arg, const std::string& type, bool old_storage);
+    virtual ~Field_temporal() {}
 
-    const char* unpack(const char* from);
+    virtual void reset(bool old_storage, bool ctor_call = false) = 0;
 };
 
-class Field_timestamp_56: public Field_longstr {
+class Field_timestamp: public Field_temporal {
 public:
-    Field_timestamp_56(const std::string& field_name_arg, const std::string& type);
+    Field_timestamp(const std::string& field_name_arg, const std::string& type, bool old_storage);
 
+    void reset(bool old_storage, bool ctor_call = false);
     const char* unpack(const char* from);
 };
 
@@ -168,35 +171,19 @@ public:
     const char* unpack(const char* from);
 };
 
-class Field_time_55: public Field_str {
-    unsigned int pack_length() const { return 3; }
+class Field_time: public Field_temporal {
 public:
+    Field_time(const std::string& field_name_arg, const std::string& type, bool old_storage);
 
-    Field_time_55(const std::string& field_name_arg, const std::string& type);
-
+    void reset(bool old_storage, bool ctor_call = false);
     const char* unpack(const char* from);
 };
 
-class Field_time_56: public Field_longstr {
+class Field_datetime: public Field_temporal {
 public:
+    Field_datetime(const std::string& field_name_arg, const std::string& type, bool old_storage);
 
-    Field_time_56(const std::string& field_name_arg, const std::string& type);
-
-    const char* unpack(const char* from);
-};
-
-class Field_datetime_55: public Field_str {
-    unsigned int pack_length() const { return 8; }
-public:
-    Field_datetime_55(const std::string& field_name_arg, const std::string& type);
-
-    const char* unpack(const char* from);
-};
-
-class Field_datetime_56: public Field_longstr {
-public:
-    Field_datetime_56(const std::string& field_name_arg, const std::string& type);
-
+    void reset(bool old_storage, bool ctor_call = false);
     const char* unpack(const char* from);
 };
 
@@ -208,9 +195,9 @@ class Field_varstring: public Field_longstr {
     unsigned int pack_length() const { return (unsigned int) field_length+length_bytes; }
 
 public:
-    Field_varstring(const std::string& field_name_arg, const std::string& type, 
+    Field_varstring(const std::string& field_name_arg, const std::string& type,
                     const collate_info& collate);
-	
+
     const char* unpack(const char* from);
 };
 
@@ -257,7 +244,7 @@ protected:
     unsigned int packlength;
 
     // Number of elements in enum
-    unsigned short count_elements;	
+    unsigned short count_elements;
 };
 
 class Field_set: public Field_enum {

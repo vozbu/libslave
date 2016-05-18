@@ -53,6 +53,7 @@ struct MasterInfo {
     unsigned long master_log_pos;
     unsigned int connect_retry;
     enum_binlog_checksum_alg checksum_alg = BINLOG_CHECKSUM_ALG_OFF;
+    bool is_old_storage = true;
 
     MasterInfo() : port(3306), master_log_pos(0), connect_retry(10) {}
 

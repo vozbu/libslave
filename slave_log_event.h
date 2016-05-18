@@ -90,6 +90,16 @@ enum Log_event_type
   ENUM_END_EVENT
 };
 
+enum Temporal_type
+{
+    MYSQL_TYPE_TIMESTAMP  =  7,
+    MYSQL_TYPE_TIME       = 11,
+    MYSQL_TYPE_DATETIME   = 12,
+    MYSQL_TYPE_TIMESTAMP2 = 17,
+    MYSQL_TYPE_DATETIME2  = 18,
+    MYSQL_TYPE_TIME2      = 19
+};
+
 #define LOG_EVENT_TYPES (ENUM_END_EVENT-1)
 
 
@@ -169,6 +179,7 @@ struct Table_map_event_info {
     unsigned long m_table_id;
     std::string m_tblnam;
     std::string m_dbnam;
+    std::vector<unsigned char> m_cols_types;
 
     Table_map_event_info(const char* buf, unsigned int event_len);
 };

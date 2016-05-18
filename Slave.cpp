@@ -231,20 +231,10 @@ void Slave::createTable(RelayLogInfo& rli,
             field = PtrField(new Field_float(name, type));
 
         else if (extract_field == "timestamp")
-        {
-            if (m_master_version < 50604)
-                field = PtrField(new Field_timestamp_55(name, type));
-            else
-                field = PtrField(new Field_timestamp_56(name, type));
-        }
+            field = PtrField(new Field_timestamp(name, type, m_master_info.is_old_storage));
 
         else if (extract_field == "datetime")
-        {
-            if (m_master_version < 50604)
-                field = PtrField(new Field_datetime_55(name, type));
-            else
-                field = PtrField(new Field_datetime_56(name, type));
-        }
+            field = PtrField(new Field_datetime(name, type, m_master_info.is_old_storage));
 
         else if (extract_field == "date")
             field = PtrField(new Field_date(name, type));
@@ -253,12 +243,7 @@ void Slave::createTable(RelayLogInfo& rli,
             field = PtrField(new Field_year(name, type));
 
         else if (extract_field == "time")
-        {
-            if (m_master_version < 50604)
-                field = PtrField(new Field_time_55(name, type));
-            else
-                field = PtrField(new Field_time_56(name, type));
-        }
+            field = PtrField(new Field_time(name, type, m_master_info.is_old_storage));
 
         else if (extract_field == "enum")
             field = PtrField(new Field_enum(name, type));
@@ -704,6 +689,8 @@ void Slave::check_master_version()
         if (3 == sscanf(tmp.c_str(), "%d.%d.%d", &major, &minor, &patch))
         {
             m_master_version = major * 10000 + minor * 100 + patch;
+            // since 5.6.4 storage for temporal types has changed
+            m_master_info.is_old_storage = m_master_version < 50604;
             static const int min_version = 50123;   // 5.1.23
             if (m_master_version >= min_version)
                 return;
@@ -892,8 +879,34 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
 
         m_rli.setTableName(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
 
+        auto table = m_rli.getTable(std::make_pair(tmi.m_dbnam, tmi.m_tblnam));
+        if (table)
+        {
+            int i = 0;
+            for (const auto& x : tmi.m_cols_types)
+            {
+                switch (x)
+                {
+                case MYSQL_TYPE_TIMESTAMP:
+                case MYSQL_TYPE_DATETIME:
+                case MYSQL_TYPE_TIME:
+                    static_cast<Field_temporal*>(table->fields[i].get())->reset(true);
+                    break;
+                case MYSQL_TYPE_TIMESTAMP2:
+                case MYSQL_TYPE_DATETIME2:
+                case MYSQL_TYPE_TIME2:
+                    static_cast<Field_temporal*>(table->fields[i].get())->reset(false);
+                    break;
+                default:
+                    break;
+                }
+                i++;
+            }
+        }
+
         if (event_stat)
             event_stat->processTableMap(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
+
         break;
     }
 
