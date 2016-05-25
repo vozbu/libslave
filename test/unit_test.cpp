@@ -5,12 +5,17 @@ using namespace boost::unit_test;
 #include <boost/algorithm/string/split.hpp>
 #include <boost/mpl/int.hpp>
 #include <boost/mpl/list.hpp>
+#include <boost/optional.hpp>
+
+#include <cfloat>
+#include <cmath>
+#include <condition_variable>
 #include <fstream>
 #include <functional>
-#include <cfloat>
-#include <condition_variable>
+#include <iostream>
 #include <mutex>
 #include <thread>
+
 #include "Slave.h"
 #include "nanomysql.h"
 #include "types.h"
