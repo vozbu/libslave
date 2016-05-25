@@ -564,6 +564,8 @@ connected:
         } catch (const std::exception& _ex ) {
 
             LOG_ERROR(log, "Met exception in get_remote_binlog cycle. Message: " << _ex.what() );
+            if (event_stat)
+                event_stat->tickError();
             usleep(1000*1000);
             continue;
 

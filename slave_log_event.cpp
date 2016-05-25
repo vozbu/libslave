@@ -48,7 +48,7 @@ void Basic_event_info::parse(const char* _buf, unsigned int _event_len) {
 
     if (event_len < LOG_POS_OFFSET + 4) {
         LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_POS_OFFSET + 4);
-        ::abort();
+        throw std::runtime_error("Basic_event_info::parse failed");
     }
 
     type = (slave::Log_event_type)buf[EVENT_TYPE_OFFSET];
@@ -62,7 +62,7 @@ Rotate_event_info::Rotate_event_info(const char* buf, unsigned int event_len) {
 
     if (event_len < LOG_EVENT_HEADER_LEN + ROTATE_HEADER_LEN) {
         LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + ROTATE_HEADER_LEN);
-        ::abort();
+        throw std::runtime_error("Rotate_event_info::Rotate_event_info failed");
     }
 
     pos = uint8korr(buf + LOG_EVENT_HEADER_LEN + R_POS_OFFSET);
@@ -75,7 +75,7 @@ Query_event_info::Query_event_info(const char* buf, unsigned int event_len) {
 
     if (event_len < LOG_EVENT_HEADER_LEN + QUERY_HEADER_LEN) {
         LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + QUERY_HEADER_LEN);
-        ::abort();
+        throw std::runtime_error("Query_event_info::Query_event_info failed");
     }
 
     unsigned int db_len = (unsigned int)buf[LOG_EVENT_HEADER_LEN + Q_DB_LEN_OFFSET];
@@ -93,7 +93,7 @@ Table_map_event_info::Table_map_event_info(const char* buf, unsigned int event_l
 
     if (event_len < LOG_EVENT_HEADER_LEN + TABLE_MAP_HEADER_LEN + 2) {
         LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + TABLE_MAP_HEADER_LEN + 2);
-        ::abort();
+        throw std::runtime_error("Table_map_event_info::Table_map_event_info failed");
     }
 
     m_table_id = uint6korr(buf + LOG_EVENT_HEADER_LEN + TM_MAPID_OFFSET);
@@ -118,7 +118,7 @@ Row_event_info::Row_event_info(const char* buf, unsigned int event_len, bool do_
     const unsigned int rows_header_len = master_ge_56 ? ROWS_HEADER_LEN : ROWS_HEADER_LEN_V1;
     if (event_len < LOG_EVENT_HEADER_LEN + rows_header_len + 2) {
         LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + rows_header_len + 2);
-        ::abort();
+        throw std::runtime_error("Row_event_info::Row_event_info failed");
     }
 
     has_after_image = do_update;
@@ -153,7 +153,7 @@ inline void check_format_description_postlen(unsigned char* b, slave::Log_event_
         LOG_ERROR(log, "Invalid Format_description event: event type " << (int)type
                   << " len: " << (int)b[(int)type - 1] << " != " << (int)len);
 
-        ::abort();
+        throw std::runtime_error("Invalid Format_description event");
     }
 }
 
@@ -167,7 +167,7 @@ inline void check_format_description(const char* buf, unsigned int event_len, bo
     if (4 != binlog_version)
     {
         LOG_ERROR(log, "Invalid binlog version: " << binlog_version << " != 4");
-        ::abort();
+        throw std::runtime_error("Invalid binlog version");
     }
 
     size_t common_header_len = (unsigned char)(buf[ST_COMMON_HEADER_LEN_OFFSET]);
@@ -176,7 +176,7 @@ inline void check_format_description(const char* buf, unsigned int event_len, bo
 
         LOG_ERROR(log, "Invalid Format_description event: common_header_len " << common_header_len
                   << " != " << LOG_EVENT_HEADER_LEN);
-        ::abort();
+        throw std::runtime_error("Invalid Format_description event");
     }
 
     // Check that binlog contains different event types not more than we know
@@ -188,7 +188,7 @@ inline void check_format_description(const char* buf, unsigned int event_len, bo
     {
         LOG_ERROR(log, "Invalid Format_description event: number_of_event_types " << number_of_event_types
                   << " > " << LOG_EVENT_TYPES);
-        ::abort();
+        throw std::runtime_error("Invalid Format_description event");
     }
 
     unsigned char event_lens[LOG_EVENT_TYPES] = { 0, };
@@ -233,7 +233,7 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
         (uint) event_len != uint4korr(buf+EVENT_LEN_OFFSET))
     {
         LOG_ERROR(log, "Sanity check failed: " << event_len);
-        ::abort();
+        throw std::runtime_error("slave::read_log_event failed");
     }
 
     if (master_ge_56 && bei.type == FORMAT_DESCRIPTION_EVENT)
@@ -255,7 +255,7 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
         if (incoming != computed)
         {
             LOG_ERROR(log, "CRC32 check failed: incoming (" << incoming << ") != computed (" << computed << ")");
-            ::abort();
+            throw std::runtime_error("slave::read_log_event failed");
         }
         bei.event_len -= BINLOG_CHECKSUM_LEN;
     }
