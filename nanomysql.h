@@ -15,7 +15,6 @@
 #ifndef __NANOMYSQL_H
 #define __NANOMYSQL_H
 
-#include <boost/bind.hpp>
 #include <mysql/mysql.h>
 #include "nanofield.h"
 #include <stdexcept>
@@ -155,12 +154,7 @@ public:
     typedef std::vector<fields_t> result_t;
 
     void store(result_t& out) {
-#ifndef __GXX_EXPERIMENTAL_CXX0X__
-        use(boost::bind(&result_t::push_back, &out, _1));
-#else
         use( [&out] (const std::map<std::string,field>& f) { out.push_back(f); } );
-#endif
-
     }
 };
 
