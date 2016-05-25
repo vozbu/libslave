@@ -5,12 +5,12 @@ using namespace boost::unit_test;
 #include <boost/algorithm/string/split.hpp>
 #include <boost/mpl/int.hpp>
 #include <boost/mpl/list.hpp>
-#include <boost/thread.hpp>
 #include <fstream>
 #include <functional>
 #include <cfloat>
-#include <mutex>
 #include <condition_variable>
+#include <mutex>
+#include <thread>
 #include "Slave.h"
 #include "nanomysql.h"
 #include "types.h"
@@ -298,11 +298,11 @@ namespace // anonymous
         };
 
         StopFlag        m_StopFlag;
-        boost::thread   m_SlaveThread;
+        std::thread     m_SlaveThread;
 
         struct Callback
         {
-            boost::mutex m_Mutex;
+            std::mutex m_Mutex;
             slave::callback m_Callback;
             Atomic<int> m_UnwantedCalls;
 
@@ -310,7 +310,7 @@ namespace // anonymous
 
             void operator() (slave::RecordSet& rs)
             {
-                boost::mutex::scoped_lock l(m_Mutex);
+                std::lock_guard<std::mutex> l(m_Mutex);
                 if (m_Callback)
                     m_Callback(rs);
                 else
@@ -319,13 +319,13 @@ namespace // anonymous
 
             void setCallback(slave::callback c)
             {
-                boost::mutex::scoped_lock l(m_Mutex);
+                std::lock_guard<std::mutex> l(m_Mutex);
                 m_Callback = c;
             }
 
             void setCallback()
             {
-                boost::mutex::scoped_lock l(m_Mutex);
+                std::lock_guard<std::mutex> l(m_Mutex);
                 m_Callback = nullptr;
             }
         };
@@ -341,7 +341,7 @@ namespace // anonymous
 
             // Run libslave with our custom stop-function, which also signals
             // when slave has read binlog position and is ready to get messages.
-            m_SlaveThread = boost::thread([this] ()
+            m_SlaveThread = std::thread([this] ()
             {
                 m_Slave.get_remote_binlog(std::ref(m_StopFlag));
                 mysql_thread_end();
@@ -775,7 +775,7 @@ namespace // anonymous
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
         }
 
-        f.m_SlaveThread = boost::thread([&f, sCurBinlogPos] ()
+        f.m_SlaveThread = std::thread([&f, sCurBinlogPos] ()
         {
             f.m_Slave.get_remote_binlog(CheckBinlogPos(f.m_Slave, sCurBinlogPos));
             mysql_thread_end();
