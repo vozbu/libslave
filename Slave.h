@@ -22,6 +22,7 @@
 #define __SLAVE_SLAVE_H_
 
 
+#include <functional>
 #include <string>
 #include <vector>
 #include <map>
@@ -64,7 +65,7 @@ private:
     callbacks_t m_callbacks;
     filters_t m_filters;
 
-    typedef boost::function<void (unsigned int)> xid_callback_t;
+    typedef std::function<void (unsigned int)> xid_callback_t;
     xid_callback_t m_xid_callback;
 
     RelayLogInfo m_rli;
@@ -112,7 +113,7 @@ public:
         m_xid_callback = _callback;
     }
 
-    void get_remote_binlog( const boost::function< bool() >& _interruptFlag = &Slave::falseFunction );
+    void get_remote_binlog(const std::function<bool()>& _interruptFlag = &Slave::falseFunction);
 
     void createDatabaseStructure() {
 

@@ -7,6 +7,7 @@ using namespace boost::unit_test;
 #include <boost/mpl/list.hpp>
 #include <boost/thread.hpp>
 #include <fstream>
+#include <functional>
 #include <cfloat>
 #include <mutex>
 #include <condition_variable>
@@ -310,7 +311,7 @@ namespace // anonymous
             void operator() (slave::RecordSet& rs)
             {
                 boost::mutex::scoped_lock l(m_Mutex);
-                if (!m_Callback.empty())
+                if (m_Callback)
                     m_Callback(rs);
                 else
                     ++m_UnwantedCalls;
@@ -325,7 +326,7 @@ namespace // anonymous
             void setCallback()
             {
                 boost::mutex::scoped_lock l(m_Mutex);
-                m_Callback.clear();
+                m_Callback = nullptr;
             }
         };
 
@@ -380,8 +381,8 @@ namespace // anonymous
             m_Slave.setMasterInfo(sMasterInfo);
             m_Slave.linkEventStat(&m_SlaveStat);
             // Set callback into Fixture - and it will call callbacks which will be set in tests.
-            m_Slave.setCallback(cfg.mysql_db, "test", boost::ref(m_Callback), filter);
-            m_Slave.setCallback(cfg.mysql_db, "stat", boost::ref(m_Callback), filter);
+            m_Slave.setCallback(cfg.mysql_db, "test", std::ref(m_Callback), filter);
+            m_Slave.setCallback(cfg.mysql_db, "stat", std::ref(m_Callback), filter);
             m_Slave.init();
             startSlave();
         }

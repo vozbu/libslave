@@ -392,7 +392,7 @@ struct raii_mysql_connector
 }// anonymous-namespace
 
 
-void Slave::get_remote_binlog( const boost::function< bool() >& _interruptFlag)
+void Slave::get_remote_binlog(const std::function<bool()>& _interruptFlag)
 {
     int count_packet = 0;
 
