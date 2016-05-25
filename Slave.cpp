@@ -149,7 +149,7 @@ void Slave::createTable(RelayLogInfo& rli,
     conn.query("SHOW FULL COLUMNS FROM " + tbl_name + " IN " + db_name);
     conn.store(res);
 
-    boost::shared_ptr<Table> table(new Table(db_name, tbl_name));
+    std::shared_ptr<Table> table(new Table(db_name, tbl_name));
 
 
     LOG_DEBUG(log, "Created new Table object: database:" << db_name << " table: " << tbl_name );

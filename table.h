@@ -19,8 +19,8 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
 
-#include <boost/shared_ptr.hpp>
 #include <boost/function.hpp>
 
 #include "field.h"
@@ -31,7 +31,7 @@
 namespace slave
 {
 
-typedef boost::shared_ptr<Field> PtrField;
+typedef std::shared_ptr<Field> PtrField;
 typedef boost::function<void (RecordSet&)> callback;
 typedef EventKind filter;
 

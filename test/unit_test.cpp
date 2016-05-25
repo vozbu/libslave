@@ -270,7 +270,7 @@ namespace // anonymous
         TestExtState m_ExtState;
         TestSlaveStat m_SlaveStat;
         slave::Slave m_Slave;
-        boost::shared_ptr<nanomysql::Connection> conn;
+        std::shared_ptr<nanomysql::Connection> conn;
 
         struct StopFlag
         {
@@ -602,7 +602,7 @@ namespace // anonymous
                      "DELETE FROM test", aErrorMessage, slave::eDelete);
         }
 
-        template<typename T> void recreate(boost::shared_ptr<nanomysql::Connection>& conn,
+        template<typename T> void recreate(std::shared_ptr<nanomysql::Connection>& conn,
                                            const Line<T>& c)
         {
             const std::string sDropTableQuery = "DROP TABLE IF EXISTS test";
@@ -611,7 +611,7 @@ namespace // anonymous
             conn->query(sCreateTableQuery);
         }
 
-        template<typename T> void testInsert(boost::shared_ptr<nanomysql::Connection>& conn,
+        template<typename T> void testInsert(std::shared_ptr<nanomysql::Connection>& conn,
                                              const std::vector<Line<T>>& data)
         {
             for (const Line<T>& c : data)
@@ -621,7 +621,7 @@ namespace // anonymous
             }
         }
 
-        template<typename T> void testUpdate(boost::shared_ptr<nanomysql::Connection>& conn,
+        template<typename T> void testUpdate(std::shared_ptr<nanomysql::Connection>& conn,
                                              const std::vector<Line<T>>& data)
         {
             for (std::size_t i = 0; i < data.size(); ++i)
@@ -640,7 +640,7 @@ namespace // anonymous
                 checkUpdate<T>(data.back(), data.front());
         }
 
-        template<typename T> void testDelete(boost::shared_ptr<nanomysql::Connection>& conn,
+        template<typename T> void testDelete(std::shared_ptr<nanomysql::Connection>& conn,
                                              const std::vector<Line<T>>& data)
         {
             for (const Line<T>& c : data)
@@ -652,7 +652,7 @@ namespace // anonymous
             }
         }
 
-        template<typename T> void testAll(boost::shared_ptr<nanomysql::Connection>& conn,
+        template<typename T> void testAll(std::shared_ptr<nanomysql::Connection>& conn,
                                           const std::vector<Line<T>>& data)
         {
             if (data.empty())

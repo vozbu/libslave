@@ -373,7 +373,7 @@ size_t n_set_bits(const std::vector<unsigned char>& b, unsigned int count) {
 }
 
 
-unsigned char* unpack_row(boost::shared_ptr<slave::Table> table,
+unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
                           slave::Row& _row,
                           unsigned int colcnt,
                           unsigned char* row,
@@ -442,7 +442,7 @@ unsigned char* unpack_row(boost::shared_ptr<slave::Table> table,
 }
 
 
-unsigned char* do_writedelete_row(boost::shared_ptr<slave::Table> table,
+unsigned char* do_writedelete_row(std::shared_ptr<slave::Table> table,
                                   const Basic_event_info& bei,
                                   const Row_event_info& roi, 
                                   unsigned char* row_start,
@@ -467,7 +467,7 @@ unsigned char* do_writedelete_row(boost::shared_ptr<slave::Table> table,
     return t;
 }
 
-unsigned char* do_update_row(boost::shared_ptr<slave::Table> table,
+unsigned char* do_update_row(std::shared_ptr<slave::Table> table,
                              const Basic_event_info& bei,
                              const Row_event_info& roi, 
                              unsigned char* row_start,
@@ -532,7 +532,7 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
 
     LOG_DEBUG(log, "applyRowEvent(): " << roi.m_table_id << " " << key.first << "." << key.second);
 
-    boost::shared_ptr<slave::Table> table = rli.getTable(key);
+    std::shared_ptr<slave::Table> table = rli.getTable(key);
 
     if (table) {
 
