@@ -16,12 +16,11 @@
 #define __SLAVE_TABLE_H_
 
 
+#include <functional>
 #include <string>
 #include <vector>
 #include <map>
-
-#include <boost/shared_ptr.hpp>
-#include <boost/function.hpp>
+#include <memory>
 
 #include "field.h"
 #include "recordset.h"
@@ -31,8 +30,8 @@
 namespace slave
 {
 
-typedef boost::shared_ptr<Field> PtrField;
-typedef boost::function<void (RecordSet&)> callback;
+typedef std::shared_ptr<Field> PtrField;
+typedef std::function<void (RecordSet&)> callback;
 typedef EventKind filter;
 
 

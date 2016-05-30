@@ -27,7 +27,7 @@
  */
 
 
-#include <boost/shared_ptr.hpp>
+#include <memory>
 #include <string>
 #include <sys/time.h>
 
@@ -179,7 +179,7 @@ private:
 // Saves ExtStateIface or it's descendants.
 // Used in singleton.
 struct StateHolder {
-    typedef boost::shared_ptr<ExtStateIface> PExtState;
+    typedef std::shared_ptr<ExtStateIface> PExtState;
     PExtState ext_state;
     StateHolder() :
         ext_state(new EmptyExtState)

@@ -17,9 +17,8 @@
 
 #include "table.h"
 
-#include <boost/shared_ptr.hpp>
-
 #include <map>
+#include <memory>
 #include <string>
 
 
@@ -27,7 +26,7 @@
 namespace slave {
 
 
-typedef boost::shared_ptr<Table> PtrTable;
+typedef std::shared_ptr<Table> PtrTable;
 
 class RelayLogInfo {
 
@@ -61,14 +60,14 @@ public:
         }
     }
 
-    boost::shared_ptr<Table> getTable(const std::pair<std::string, std::string>& key) {
+    std::shared_ptr<Table> getTable(const std::pair<std::string, std::string>& key) {
         name_to_table_t::iterator p = m_table_map.find(key);
 
         if (p != m_table_map.end()) {
             return p->second;
 
         } else {
-            return boost::shared_ptr<Table>();
+            return std::shared_ptr<Table>();
         }
     }
 

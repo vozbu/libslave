@@ -5,11 +5,17 @@ using namespace boost::unit_test;
 #include <boost/algorithm/string/split.hpp>
 #include <boost/mpl/int.hpp>
 #include <boost/mpl/list.hpp>
-#include <boost/thread.hpp>
-#include <fstream>
+#include <boost/optional.hpp>
+
 #include <cfloat>
-#include <mutex>
+#include <cmath>
 #include <condition_variable>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <mutex>
+#include <thread>
+
 #include "Slave.h"
 #include "nanomysql.h"
 #include "types.h"
@@ -270,7 +276,7 @@ namespace // anonymous
         TestExtState m_ExtState;
         TestSlaveStat m_SlaveStat;
         slave::Slave m_Slave;
-        boost::shared_ptr<nanomysql::Connection> conn;
+        std::shared_ptr<nanomysql::Connection> conn;
 
         struct StopFlag
         {
@@ -297,11 +303,11 @@ namespace // anonymous
         };
 
         StopFlag        m_StopFlag;
-        boost::thread   m_SlaveThread;
+        std::thread     m_SlaveThread;
 
         struct Callback
         {
-            boost::mutex m_Mutex;
+            std::mutex m_Mutex;
             slave::callback m_Callback;
             Atomic<int> m_UnwantedCalls;
 
@@ -309,8 +315,8 @@ namespace // anonymous
 
             void operator() (slave::RecordSet& rs)
             {
-                boost::mutex::scoped_lock l(m_Mutex);
-                if (!m_Callback.empty())
+                std::lock_guard<std::mutex> l(m_Mutex);
+                if (m_Callback)
                     m_Callback(rs);
                 else
                     ++m_UnwantedCalls;
@@ -318,14 +324,14 @@ namespace // anonymous
 
             void setCallback(slave::callback c)
             {
-                boost::mutex::scoped_lock l(m_Mutex);
+                std::lock_guard<std::mutex> l(m_Mutex);
                 m_Callback = c;
             }
 
             void setCallback()
             {
-                boost::mutex::scoped_lock l(m_Mutex);
-                m_Callback.clear();
+                std::lock_guard<std::mutex> l(m_Mutex);
+                m_Callback = nullptr;
             }
         };
 
@@ -340,7 +346,7 @@ namespace // anonymous
 
             // Run libslave with our custom stop-function, which also signals
             // when slave has read binlog position and is ready to get messages.
-            m_SlaveThread = boost::thread([this] ()
+            m_SlaveThread = std::thread([this] ()
             {
                 m_Slave.get_remote_binlog(std::ref(m_StopFlag));
                 mysql_thread_end();
@@ -380,8 +386,8 @@ namespace // anonymous
             m_Slave.setMasterInfo(sMasterInfo);
             m_Slave.linkEventStat(&m_SlaveStat);
             // Set callback into Fixture - and it will call callbacks which will be set in tests.
-            m_Slave.setCallback(cfg.mysql_db, "test", boost::ref(m_Callback), filter);
-            m_Slave.setCallback(cfg.mysql_db, "stat", boost::ref(m_Callback), filter);
+            m_Slave.setCallback(cfg.mysql_db, "test", std::ref(m_Callback), filter);
+            m_Slave.setCallback(cfg.mysql_db, "stat", std::ref(m_Callback), filter);
             m_Slave.init();
             startSlave();
         }
@@ -602,7 +608,7 @@ namespace // anonymous
                      "DELETE FROM test", aErrorMessage, slave::eDelete);
         }
 
-        template<typename T> void recreate(boost::shared_ptr<nanomysql::Connection>& conn,
+        template<typename T> void recreate(std::shared_ptr<nanomysql::Connection>& conn,
                                            const Line<T>& c)
         {
             const std::string sDropTableQuery = "DROP TABLE IF EXISTS test";
@@ -611,7 +617,7 @@ namespace // anonymous
             conn->query(sCreateTableQuery);
         }
 
-        template<typename T> void testInsert(boost::shared_ptr<nanomysql::Connection>& conn,
+        template<typename T> void testInsert(std::shared_ptr<nanomysql::Connection>& conn,
                                              const std::vector<Line<T>>& data)
         {
             for (const Line<T>& c : data)
@@ -621,7 +627,7 @@ namespace // anonymous
             }
         }
 
-        template<typename T> void testUpdate(boost::shared_ptr<nanomysql::Connection>& conn,
+        template<typename T> void testUpdate(std::shared_ptr<nanomysql::Connection>& conn,
                                              const std::vector<Line<T>>& data)
         {
             for (std::size_t i = 0; i < data.size(); ++i)
@@ -640,7 +646,7 @@ namespace // anonymous
                 checkUpdate<T>(data.back(), data.front());
         }
 
-        template<typename T> void testDelete(boost::shared_ptr<nanomysql::Connection>& conn,
+        template<typename T> void testDelete(std::shared_ptr<nanomysql::Connection>& conn,
                                              const std::vector<Line<T>>& data)
         {
             for (const Line<T>& c : data)
@@ -652,7 +658,7 @@ namespace // anonymous
             }
         }
 
-        template<typename T> void testAll(boost::shared_ptr<nanomysql::Connection>& conn,
+        template<typename T> void testAll(std::shared_ptr<nanomysql::Connection>& conn,
                                           const std::vector<Line<T>>& data)
         {
             if (data.empty())
@@ -774,7 +780,7 @@ namespace // anonymous
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
         }
 
-        f.m_SlaveThread = boost::thread([&f, sCurBinlogPos] ()
+        f.m_SlaveThread = std::thread([&f, sCurBinlogPos] ()
         {
             f.m_Slave.get_remote_binlog(CheckBinlogPos(f.m_Slave, sCurBinlogPos));
             mysql_thread_end();

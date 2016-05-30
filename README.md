@@ -36,9 +36,8 @@ For building the library, you will need:
      into your mysql include directory.
 
  * The headers of the boost libraries (http://www.boost.org).
-   At the minimum, you will need at least the shared_ptr.hpp, function.hpp,
-   any.hpp and bind.hpp. If boost_unit_test_framework and boost_thread is
-   found, tests will be built.
+   At the minimum, you will need at least the any.hpp.
+   If boost_unit_test_framework is found, tests will be built.
 
  * You (likely) will need to review and edit the contents of Logging.h
    and SlaveStats.h
