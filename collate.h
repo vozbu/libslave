@@ -6,7 +6,7 @@
 
 namespace nanomysql
 {
-    struct Connection;
+    class Connection;
 }
 
 namespace slave

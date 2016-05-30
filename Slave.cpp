@@ -1025,8 +1025,6 @@ void Slave::generateSlaveId()
 
     while (1) {
 
-        if (serveroid < 0) serveroid = -serveroid;
-
         if (server_ids.count(serveroid) != 0) {
             serveroid++;
         } else {
