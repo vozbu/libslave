@@ -53,6 +53,7 @@ private:
     MYSQL mysql;
 
     int m_server_id;
+    int m_master_version = 0;
 
     MasterInfo m_master_info;
     EmptyExtState empty_ext_state;
@@ -136,6 +137,8 @@ public:
     void init();
 
     int serverId() const { return m_server_id; }
+    int masterVersion() const { return m_master_version; }
+    bool masterGe56() const { return m_master_version >= 50600; }
 
     // Closes connection, opened in get_remotee_binlog. Should be called if your have get_remote_binlog
     // blocked on reading data from mysql server in the separate thread and you want to stop this thread.
@@ -164,6 +167,7 @@ protected:
 
     void register_slave_on_master(MYSQL* mysql);
     void deregister_slave_on_master(MYSQL* mysql);
+    void do_checksum_handshake(MYSQL* mysql);
 
     void generateSlaveId();
 

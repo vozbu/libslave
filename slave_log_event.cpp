@@ -20,8 +20,11 @@
 #include <mysql/my_global.h>
 #undef min
 #undef max
+#undef test
 
 #include <mysql/mysql.h>
+
+#include <zlib.h>
 
 #include "relayloginfo.h"
 #include "slave_log_event.h"
@@ -45,7 +48,7 @@ void Basic_event_info::parse(const char* _buf, unsigned int _event_len) {
 
     if (event_len < LOG_POS_OFFSET + 4) {
         LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_POS_OFFSET + 4);
-        ::abort();
+        throw std::runtime_error("Basic_event_info::parse failed");
     }
 
     type = (slave::Log_event_type)buf[EVENT_TYPE_OFFSET];
@@ -59,7 +62,7 @@ Rotate_event_info::Rotate_event_info(const char* buf, unsigned int event_len) {
 
     if (event_len < LOG_EVENT_HEADER_LEN + ROTATE_HEADER_LEN) {
         LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + ROTATE_HEADER_LEN);
-        ::abort();
+        throw std::runtime_error("Rotate_event_info::Rotate_event_info failed");
     }
 
     pos = uint8korr(buf + LOG_EVENT_HEADER_LEN + R_POS_OFFSET);
@@ -72,7 +75,7 @@ Query_event_info::Query_event_info(const char* buf, unsigned int event_len) {
 
     if (event_len < LOG_EVENT_HEADER_LEN + QUERY_HEADER_LEN) {
         LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + QUERY_HEADER_LEN);
-        ::abort();
+        throw std::runtime_error("Query_event_info::Query_event_info failed");
     }
 
     unsigned int db_len = (unsigned int)buf[LOG_EVENT_HEADER_LEN + Q_DB_LEN_OFFSET];
@@ -90,7 +93,7 @@ Table_map_event_info::Table_map_event_info(const char* buf, unsigned int event_l
 
     if (event_len < LOG_EVENT_HEADER_LEN + TABLE_MAP_HEADER_LEN + 2) {
         LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + TABLE_MAP_HEADER_LEN + 2);
-        ::abort();
+        throw std::runtime_error("Table_map_event_info::Table_map_event_info failed");
     }
 
     m_table_id = uint6korr(buf + LOG_EVENT_HEADER_LEN + TM_MAPID_OFFSET);
@@ -104,20 +107,25 @@ Table_map_event_info::Table_map_event_info(const char* buf, unsigned int event_l
     size_t tblen = *(p_tblen);
 
     m_tblnam.assign((const char*)(p_tblen + 1), tblen);
+
+    unsigned char* p_width = p_tblen + tblen + 2;
+    unsigned long width = net_field_length(&p_width);
+
+    m_cols_types.assign(p_width, p_width + width);
 }
 
-Row_event_info::Row_event_info(const char* buf, unsigned int event_len, bool do_update) {
-
-    if (event_len < LOG_EVENT_HEADER_LEN + ROWS_HEADER_LEN + 2) {
-        LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + ROWS_HEADER_LEN + 2);
-        ::abort();
+Row_event_info::Row_event_info(const char* buf, unsigned int event_len, bool do_update, bool master_ge_56) {
+    const unsigned int rows_header_len = master_ge_56 ? ROWS_HEADER_LEN : ROWS_HEADER_LEN_V1;
+    if (event_len < LOG_EVENT_HEADER_LEN + rows_header_len + 2) {
+        LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + rows_header_len + 2);
+        throw std::runtime_error("Row_event_info::Row_event_info failed");
     }
 
     has_after_image = do_update;
 
     m_table_id = uint6korr(buf + LOG_EVENT_HEADER_LEN + RW_MAPID_OFFSET);
 
-    unsigned char* start = (unsigned char*)(buf + LOG_EVENT_HEADER_LEN + ROWS_HEADER_LEN);
+    unsigned char* start = (unsigned char*)(buf + LOG_EVENT_HEADER_LEN + rows_header_len);
 
     m_width = net_field_length(&start);
 
@@ -145,12 +153,12 @@ inline void check_format_description_postlen(unsigned char* b, slave::Log_event_
         LOG_ERROR(log, "Invalid Format_description event: event type " << (int)type
                   << " len: " << (int)b[(int)type - 1] << " != " << (int)len);
 
-        ::abort();
+        throw std::runtime_error("Invalid Format_description event");
     }
 }
 
 
-inline void check_format_description(const char* buf, unsigned int event_len) {
+inline void check_format_description(const char* buf, unsigned int event_len, bool master_ge_56) {
 
     buf += LOG_EVENT_MINIMAL_HEADER_LEN;
 
@@ -159,7 +167,7 @@ inline void check_format_description(const char* buf, unsigned int event_len) {
     if (4 != binlog_version)
     {
         LOG_ERROR(log, "Invalid binlog version: " << binlog_version << " != 4");
-        ::abort();
+        throw std::runtime_error("Invalid binlog version");
     }
 
     size_t common_header_len = (unsigned char)(buf[ST_COMMON_HEADER_LEN_OFFSET]);
@@ -168,7 +176,7 @@ inline void check_format_description(const char* buf, unsigned int event_len) {
 
         LOG_ERROR(log, "Invalid Format_description event: common_header_len " << common_header_len
                   << " != " << LOG_EVENT_HEADER_LEN);
-        ::abort();
+        throw std::runtime_error("Invalid Format_description event");
     }
 
     // Check that binlog contains different event types not more than we know
@@ -180,7 +188,7 @@ inline void check_format_description(const char* buf, unsigned int event_len) {
     {
         LOG_ERROR(log, "Invalid Format_description event: number_of_event_types " << number_of_event_types
                   << " > " << LOG_EVENT_TYPES);
-        ::abort();
+        throw std::runtime_error("Invalid Format_description event");
     }
 
     unsigned char event_lens[LOG_EVENT_TYPES] = { 0, };
@@ -192,14 +200,26 @@ inline void check_format_description(const char* buf, unsigned int event_len) {
     check_format_description_postlen(event_lens, ROTATE_EVENT, ROTATE_HEADER_LEN);
     check_format_description_postlen(event_lens, FORMAT_DESCRIPTION_EVENT, START_V3_HEADER_LEN + 1 + number_of_event_types);
     check_format_description_postlen(event_lens, TABLE_MAP_EVENT, TABLE_MAP_HEADER_LEN);
-    check_format_description_postlen(event_lens, WRITE_ROWS_EVENT, ROWS_HEADER_LEN);
-    check_format_description_postlen(event_lens, UPDATE_ROWS_EVENT, ROWS_HEADER_LEN);
-    check_format_description_postlen(event_lens, DELETE_ROWS_EVENT, ROWS_HEADER_LEN);
+    check_format_description_postlen(event_lens, WRITE_ROWS_EVENT_V1, ROWS_HEADER_LEN_V1);
+    check_format_description_postlen(event_lens, UPDATE_ROWS_EVENT_V1, ROWS_HEADER_LEN_V1);
+    check_format_description_postlen(event_lens, DELETE_ROWS_EVENT_V1, ROWS_HEADER_LEN_V1);
+    if (master_ge_56)
+    {
+        check_format_description_postlen(event_lens, WRITE_ROWS_EVENT, ROWS_HEADER_LEN);
+        check_format_description_postlen(event_lens, UPDATE_ROWS_EVENT, ROWS_HEADER_LEN);
+        check_format_description_postlen(event_lens, DELETE_ROWS_EVENT, ROWS_HEADER_LEN);
+    }
 
 }
 
 
-bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, EventStatIface* event_stat)
+inline uint32_t checksum_crc32(uint32_t crc, const unsigned char* pos, size_t length)
+{
+    return static_cast<uint32_t>(::crc32(static_cast<unsigned int>(crc), pos, static_cast<unsigned int>(length)));
+}
+
+
+bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, EventStatIface* event_stat, bool master_ge_56, MasterInfo& master_info)
 
 {
 
@@ -213,7 +233,31 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
         (uint) event_len != uint4korr(buf+EVENT_LEN_OFFSET))
     {
         LOG_ERROR(log, "Sanity check failed: " << event_len);
-        ::abort();
+        throw std::runtime_error("slave::read_log_event failed");
+    }
+
+    if (master_ge_56 && bei.type == FORMAT_DESCRIPTION_EVENT)
+    {
+        enum_binlog_checksum_alg alg = static_cast<enum_binlog_checksum_alg>(*(buf + event_len - BINLOG_CHECKSUM_LEN - BINLOG_CHECKSUM_ALG_DESC_LEN));
+        if (alg == BINLOG_CHECKSUM_ALG_OFF || alg == BINLOG_CHECKSUM_ALG_CRC32)
+            master_info.checksum_alg = alg;
+    }
+
+    if (master_info.checksumEnabled())
+    {
+        uint32_t incoming;
+        ::memcpy(&incoming, buf + event_len - BINLOG_CHECKSUM_LEN, sizeof(incoming));
+        incoming = le32toh(incoming);
+
+        uint32_t computed = checksum_crc32(0L, nullptr, 0);
+        computed = checksum_crc32(computed, (const unsigned char*)buf, event_len - BINLOG_CHECKSUM_LEN);
+
+        if (incoming != computed)
+        {
+            LOG_ERROR(log, "CRC32 check failed: incoming (" << incoming << ") != computed (" << computed << ")");
+            throw std::runtime_error("slave::read_log_event failed");
+        }
+        bei.event_len -= BINLOG_CHECKSUM_LEN;
     }
 
     if (event_stat)
@@ -224,7 +268,9 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
 
     case FORMAT_DESCRIPTION_EVENT:
 
-        check_format_description(buf, event_len);
+        if (master_ge_56)
+            event_len -= (BINLOG_CHECKSUM_ALG_DESC_LEN + BINLOG_CHECKSUM_LEN);
+        check_format_description(buf, event_len, master_ge_56);
 
         if (event_stat)
             event_stat->tickFormatDescription();
@@ -243,6 +289,9 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
         if (event_stat)
             event_stat->tickXid();
         return true;
+    case WRITE_ROWS_EVENT_V1:
+    case UPDATE_ROWS_EVENT_V1:
+    case DELETE_ROWS_EVENT_V1:
     case WRITE_ROWS_EVENT:
     case UPDATE_ROWS_EVENT:
     case DELETE_ROWS_EVENT:
@@ -272,6 +321,14 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
     case EXECUTE_LOAD_QUERY_EVENT:
     case INCIDENT_EVENT:
     case HEARTBEAT_LOG_EVENT:
+    case IGNORABLE_LOG_EVENT:
+    case ROWS_QUERY_LOG_EVENT:
+    case GTID_LOG_EVENT:
+    case ANONYMOUS_GTID_LOG_EVENT:
+    case PREVIOUS_GTIDS_LOG_EVENT:
+    case TRANSACTION_CONTEXT_EVENT:
+    case VIEW_CHANGE_EVENT:
+    case XA_PREPARE_LOG_EVENT:
         if (event_stat)
             event_stat->tickOther();
         return false;
@@ -320,12 +377,10 @@ unsigned char* unpack_row(boost::shared_ptr<slave::Table> table,
                           slave::Row& _row,
                           unsigned int colcnt,
                           unsigned char* row,
-                          const std::vector<unsigned char>& cols,
-                          const std::vector<unsigned char>& cols_ai)
+                          const std::vector<unsigned char>& cols)
 {
 
-    LOG_TRACE(log, "Unpacking row: " << table->fields.size() << "," << colcnt << "," << cols.size()
-              << "," << cols_ai.size());
+    LOG_TRACE(log, "Unpacking row: " << table->fields.size() << "," << colcnt << "," << cols.size());
 
     if (colcnt != table->fields.size()) {
         LOG_ERROR(log, "Field count mismatch in unpacking row for "
@@ -354,12 +409,6 @@ unsigned char* unpack_row(boost::shared_ptr<slave::Table> table,
         if (!(cols[i / 8] & (1 << (i & 7)))) {
 
             LOG_TRACE(log, "field " << field->getFieldName() << " is not in column list.");
-            continue;
-        }
-
-        if (cols_ai.size() && !(cols_ai[i / 8] & (1 << (i & 7)))) {
-
-            LOG_TRACE(log, "field " << field->getFieldName() << " is not in the update after-image.");
             continue;
         }
 
@@ -401,7 +450,7 @@ unsigned char* do_writedelete_row(boost::shared_ptr<slave::Table> table,
 
     slave::RecordSet _record_set;
 
-    unsigned char* t = unpack_row(table, _record_set.m_row, roi.m_width, row_start, roi.m_cols, roi.m_cols_ai);
+    unsigned char* t = unpack_row(table, _record_set.m_row, roi.m_width, row_start, roi.m_cols);
 
     if (t == NULL) {
         return NULL;
@@ -410,7 +459,7 @@ unsigned char* do_writedelete_row(boost::shared_ptr<slave::Table> table,
     _record_set.when = bei.when;
     _record_set.tbl_name = table->table_name;
     _record_set.db_name = table->database_name;
-    _record_set.type_event = (bei.type == WRITE_ROWS_EVENT ? slave::RecordSet::Write : slave::RecordSet::Delete);
+    _record_set.type_event = (bei.type == WRITE_ROWS_EVENT_V1 || bei.type == WRITE_ROWS_EVENT ? slave::RecordSet::Write : slave::RecordSet::Delete);
     _record_set.master_id = bei.server_id;
 
     table->call_callback(_record_set, ext_state);
@@ -426,13 +475,13 @@ unsigned char* do_update_row(boost::shared_ptr<slave::Table> table,
 
     slave::RecordSet _record_set;
 
-    unsigned char* t = unpack_row(table, _record_set.m_old_row, roi.m_width, row_start, roi.m_cols, roi.m_cols_ai);
+    unsigned char* t = unpack_row(table, _record_set.m_old_row, roi.m_width, row_start, roi.m_cols);
 
     if (t == NULL) {
         return NULL;
     }
 
-    t = unpack_row(table, _record_set.m_row, roi.m_width, t, roi.m_cols, roi.m_cols_ai);
+    t = unpack_row(table, _record_set.m_row, roi.m_width, t, roi.m_cols_ai);
 
     if (t == NULL) {
         return NULL;
@@ -455,9 +504,12 @@ namespace // anonymous
     {
         switch(type)
         {
-        case WRITE_ROWS_EVENT: return eInsert;
-        case UPDATE_ROWS_EVENT: return eUpdate;
-        case DELETE_ROWS_EVENT: return eDelete;
+        case WRITE_ROWS_EVENT_V1:
+        case WRITE_ROWS_EVENT:    return eInsert;
+        case UPDATE_ROWS_EVENT_V1:
+        case UPDATE_ROWS_EVENT:   return eUpdate;
+        case DELETE_ROWS_EVENT_V1:
+        case DELETE_ROWS_EVENT:   return eDelete;
         default: throw std::logic_error("is not processable kind");
         }
     }
@@ -490,12 +542,12 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
         unsigned char* row_start = roi.m_rows_buf;
 
         if (should_process(table->m_filter, kind)) {
+            time_stamp start = now();
             while (row_start < roi.m_rows_end &&
                    row_start != NULL) {
-                time_stamp start = now();
                 try
                 {
-                    if (bei.type == UPDATE_ROWS_EVENT) {
+                    if (kind == eUpdate) {
 
                         row_start = do_update_row(table, bei, roi, row_start, ext_state);
 
@@ -510,8 +562,11 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
                     throw;
                 }
                 if (event_stat)
-                    event_stat->tickModifyDone(roi.m_table_id, kind, now() - start);
+                    event_stat->tickModifyRow();
             }
+
+            if (event_stat)
+                event_stat->tickModifyDone(roi.m_table_id, kind, now() - start);
             return;
         }
     }

@@ -165,6 +165,7 @@ namespace // anonymous
             uint64_t events_xid                = 0;
             uint64_t events_other              = 0;
             uint64_t events_modify             = 0;
+            uint64_t rows_modify               = 0;
 
             struct Counter
             {
@@ -258,6 +259,11 @@ namespace // anonymous
                 map_detailed[key].total  += 1;
                 map_detailed[key].failed += time;
             }
+
+            virtual void tickModifyRow()
+            {
+                ++rows_modify;
+            }
         };
 
         config cfg;
@@ -334,7 +340,11 @@ namespace // anonymous
 
             // Run libslave with our custom stop-function, which also signals
             // when slave has read binlog position and is ready to get messages.
-            m_SlaveThread = boost::thread([this] () { m_Slave.get_remote_binlog(std::ref(m_StopFlag)); });
+            m_SlaveThread = boost::thread([this] ()
+            {
+                m_Slave.get_remote_binlog(std::ref(m_StopFlag));
+                mysql_thread_end();
+            });
 
             // Wait libslave to run - no more than 1000 times with 1 ms.
             const timespec ts = {0 , 1000000};
@@ -355,6 +365,7 @@ namespace // anonymous
 
             conn.reset(new nanomysql::Connection(cfg.mysql_host, cfg.mysql_user, cfg.mysql_pass, cfg.mysql_db));
             conn->query("set names utf8");
+            conn->query("set time_zone='+3:00'");
             // Create table, because if it does not exist, libslave will swear the lack of it, and test will finished.
             conn->query("CREATE TABLE IF NOT EXISTS test (tmp int)");
             // Create another table for testing map_detailed stat.
@@ -763,7 +774,11 @@ namespace // anonymous
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
         }
 
-        f.m_SlaveThread = boost::thread([&f, sCurBinlogPos] () { f.m_Slave.get_remote_binlog(CheckBinlogPos(f.m_Slave, sCurBinlogPos)); });
+        f.m_SlaveThread = boost::thread([&f, sCurBinlogPos] ()
+        {
+            f.m_Slave.get_remote_binlog(CheckBinlogPos(f.m_Slave, sCurBinlogPos));
+            mysql_thread_end();
+        });
 
         // Wait callback triggering no more than 1 second.
         const timespec ts = {0 , 1000000};
@@ -830,7 +845,12 @@ namespace // anonymous
         MYSQL_TEXT,
         MYSQL_DECIMAL,
         MYSQL_BIT,
-        MYSQL_SET
+        MYSQL_SET,
+        MYSQL_TIMESTAMP,
+        MYSQL_TIME,
+        MYSQL_DATETIME,
+        MYSQL_DATE,
+        MYSQL_YEAR
     };
 
     template <MYSQL_TYPE T>
@@ -907,6 +927,46 @@ namespace // anonymous
         static const std::string name;
     };
     const std::string MYSQL_type_traits<MYSQL_SET>::name = "SET";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_TIMESTAMP>
+    {
+        typedef slave::types::MY_TIMESTAMP slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_TIMESTAMP>::name = "TIMESTAMP";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_TIME>
+    {
+        typedef slave::types::MY_TIME slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_TIME>::name = "TIME";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_DATETIME>
+    {
+        typedef slave::types::MY_DATETIME slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_DATETIME>::name = "DATETIME";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_DATE>
+    {
+        typedef slave::types::MY_DATE slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_DATE>::name = "DATE";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_YEAR>
+    {
+        typedef slave::types::MY_TINYINT slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_YEAR>::name = "YEAR";
 
     template <typename T>
     void getValue(const std::string& s, T& t)
@@ -1010,6 +1070,11 @@ namespace // anonymous
         testOneType<boost::mpl::int_<MYSQL_DECIMAL>>(f);
         testOneType<boost::mpl::int_<MYSQL_BIT>>(f);
         testOneType<boost::mpl::int_<MYSQL_SET>>(f);
+        testOneType<boost::mpl::int_<MYSQL_TIMESTAMP>>(f);
+        testOneType<boost::mpl::int_<MYSQL_TIME>>(f);
+        testOneType<boost::mpl::int_<MYSQL_DATETIME>>(f);
+        testOneType<boost::mpl::int_<MYSQL_DATE>>(f);
+        testOneType<boost::mpl::int_<MYSQL_YEAR>>(f);
     }
 
     void testStatOneFilter(slave::EventKind filter)
@@ -1039,13 +1104,19 @@ namespace // anonymous
             f.conn->query(sQuery);
             f.waitCall();
 
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              12);
+            if (f.m_Slave.masterVersion() < 50700)
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              12);
+            else
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              16);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_table_map,          2);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_format_description, 1);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,              4);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_rotate,             1);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                2);
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
+            if (f.m_Slave.masterVersion() < 50700)
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
+            else
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              4);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             2);
 
             auto sPair = std::make_pair(f.cfg.mysql_db, "test");
@@ -1197,14 +1268,21 @@ namespace // anonymous
 
         f.waitCall();
 
-        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              24);
+        if (f.m_Slave.masterVersion() < 50700)
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              24);
+        else
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_total,              30);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_table_map,          6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_format_description, 1);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,              6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_rotate,             1);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                4);
-        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
+        if (f.m_Slave.masterVersion() < 50700)
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
+        else
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             6);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.rows_modify,               6);
 
         auto sPair = std::make_pair(f.cfg.mysql_db, "test");
         if (f.m_SlaveStat.map_table.find(sPair) == f.m_SlaveStat.map_table.end())
@@ -1321,6 +1399,26 @@ namespace // anonymous
         BOOST_CHECK_LE(f.m_SlaveStat.last_event_master_time, f.m_SlaveStat.last_event_receive_time);
     }
 
+    void testRowsModify()
+    {
+        Fixture f;
+
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+        f.conn->query("INSERT INTO test VALUES (345234),(345235),(345236),(345237)");
+        f.conn->query("UPDATE test SET value=0");
+        f.waitCall();
+
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify, 2);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.rows_modify,   8);
+
+        f.conn->query("DELETE FROM test");
+        f.waitCall();
+
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify, 3);
+        BOOST_CHECK_EQUAL(f.m_SlaveStat.rows_modify,   12);
+    }
+
     void test_Stat()
     {
         testStatOneFilter(slave::eAll);
@@ -1337,6 +1435,104 @@ namespace // anonymous
         testXidEvents();
         testMapDetailed();
         testLastEventTime();
+        testRowsModify();
+    }
+
+    struct CallbackRowImage
+    {
+        CallbackRowImage() { reset(); }
+
+        void operator() (const slave::RecordSet& rs)
+        {
+            if (not rs.m_old_row.empty())
+            {
+                old_row_empty = false;
+                auto it = rs.m_old_row.find("id");
+                if (it != rs.m_old_row.end())
+                    id_old = boost::any_cast<uint32_t>(it->second.second);
+
+                it = rs.m_old_row.find("value");
+                if (it != rs.m_old_row.end())
+                    value_old = boost::any_cast<uint32_t>(it->second.second);
+            }
+            auto it = rs.m_row.find("id");
+            if (it != rs.m_row.end())
+                id = boost::any_cast<uint32_t>(it->second.second);
+
+            it = rs.m_row.find("value");
+            if (it != rs.m_row.end())
+                value = boost::any_cast<uint32_t>(it->second.second);
+        }
+
+        void reset()
+        {
+            old_row_empty = true;
+            id_old = value_old = id = value = 0;
+        }
+
+        bool old_row_empty;
+        uint32_t id_old;
+        uint32_t value_old;
+        uint32_t id;
+        uint32_t value;
+    };
+
+    void test_BinlogRowImageOption()
+    {
+        Fixture f;
+
+        bool row_image_minimal = false;
+        if (f.m_Slave.masterVersion() >= 50602)
+        {
+            f.conn->query("SELECT @@GLOBAL.binlog_row_image as binlog_row_image");
+            f.conn->use([&row_image_minimal](const nanomysql::fields_t& row)
+            {
+                row_image_minimal = row.at("binlog_row_image").data == "MINIMAL";
+            });
+        }
+
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (id int, value int, PRIMARY KEY(id))");
+
+        CallbackRowImage sCallback;
+        f.m_Callback.setCallback(std::ref(sCallback));
+
+        f.conn->query("INSERT INTO test VALUES (1, 345234)");
+        f.waitCall();
+        BOOST_CHECK_EQUAL(sCallback.old_row_empty, true);
+        BOOST_CHECK_EQUAL(sCallback.id,    1);
+        BOOST_CHECK_EQUAL(sCallback.value, 345234);
+        sCallback.reset();
+
+        f.conn->query("UPDATE test SET value=132133 WHERE id=1");
+        f.waitCall();
+        BOOST_CHECK_EQUAL(sCallback.old_row_empty, false);
+        BOOST_CHECK_EQUAL(sCallback.id_old,    1);
+        if (not row_image_minimal)
+        {
+            BOOST_CHECK_EQUAL(sCallback.value_old, 345234);
+            BOOST_CHECK_EQUAL(sCallback.id,        1);
+        }
+        else
+        {
+            BOOST_CHECK_EQUAL(sCallback.value_old, 0);
+            BOOST_CHECK_EQUAL(sCallback.id,        0);
+        }
+        BOOST_CHECK_EQUAL(sCallback.value,     132133);
+        sCallback.reset();
+
+        f.conn->query("DELETE FROM test WHERE id=1");
+        f.waitCall();
+        BOOST_CHECK_EQUAL(sCallback.old_row_empty, true);
+        BOOST_CHECK_EQUAL(sCallback.id,        1);
+        if (not row_image_minimal)
+            BOOST_CHECK_EQUAL(sCallback.value,     132133);
+        else
+            BOOST_CHECK_EQUAL(sCallback.value,     0);
+
+        f.m_Callback.setCallback();
+        if (0 != f.m_Callback.m_UnwantedCalls)
+            BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
     }
 }// anonymous-namespace
 
@@ -1350,6 +1546,7 @@ test_suite* init_unit_test_suite(int argc, char* argv[])
     ADD_FIXTURE_TEST(test_SetBinlogPos);
     ADD_FIXTURE_TEST(test_Disconnect);
     ADD_FIXTURE_TEST(test_Stat);
+    ADD_FIXTURE_TEST(test_BinlogRowImageOption);
 
 #undef ADD_FIXTURE_TEST
 

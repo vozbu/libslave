@@ -21,6 +21,8 @@
 
 #include "nanomysql.h"
 
+#include <mysql/errmsg.h>
+#include <mysql/mysqld_error.h>
 #include <mysql/my_global.h>
 #include <mysql/m_ctype.h>
 #include <mysql/sql_common.h>
@@ -66,6 +68,28 @@ std::string get_hostname()
     }
     return std::string(buf);
 }
+
+const char* binlog_checksum_type_names[] =
+{
+    "NONE",
+    "CRC32",
+    nullptr
+};
+
+unsigned int binlog_checksum_type_length[] =
+{
+    sizeof("NONE") - 1,
+    sizeof("CRC32") - 1,
+    0
+};
+
+TYPELIB binlog_checksum_typelib =
+{
+    array_elements(binlog_checksum_type_names) - 1, "",
+    binlog_checksum_type_names,
+    binlog_checksum_type_length
+};
+
 }// anonymous-namespace
 
 
@@ -208,10 +232,10 @@ void Slave::createTable(RelayLogInfo& rli,
             field = PtrField(new Field_float(name, type));
 
         else if (extract_field == "timestamp")
-            field = PtrField(new Field_timestamp(name, type));
+            field = PtrField(new Field_timestamp(name, type, m_master_info.is_old_storage));
 
         else if (extract_field == "datetime")
-            field = PtrField(new Field_datetime(name, type));
+            field = PtrField(new Field_datetime(name, type, m_master_info.is_old_storage));
 
         else if (extract_field == "date")
             field = PtrField(new Field_date(name, type));
@@ -220,7 +244,7 @@ void Slave::createTable(RelayLogInfo& rli,
             field = PtrField(new Field_year(name, type));
 
         else if (extract_field == "time")
-            field = PtrField(new Field_time(name, type));
+            field = PtrField(new Field_time(name, type, m_master_info.is_old_storage));
 
         else if (extract_field == "enum")
             field = PtrField(new Field_enum(name, type));
@@ -384,6 +408,7 @@ void Slave::get_remote_binlog( const boost::function< bool() >& _interruptFlag)
     register_slave_on_master(&mysql);
 
 connected:
+    do_checksum_handshake(&mysql);
 
     // Get binlog position saved in ext_state before, or load it
     // from persistent storage. Get false if failed to get binlog position.
@@ -466,7 +491,9 @@ connected:
             if (!slave::read_log_event((const char*) mysql.net.read_pos + 1,
                                        len - 1,
                                        event,
-                                       event_stat)) {
+                                       event_stat,
+                                       masterGe56(),
+                                       m_master_info)) {
 
                 LOG_TRACE(log, "Skipping unknown event.");
                 continue;
@@ -537,6 +564,8 @@ connected:
         } catch (const std::exception& _ex ) {
 
             LOG_ERROR(log, "Met exception in get_remote_binlog cycle. Message: " << _ex.what() );
+            if (event_stat)
+                event_stat->tickError();
             usleep(1000*1000);
             continue;
 
@@ -662,9 +691,11 @@ void Slave::check_master_version()
         int major, minor, patch;
         if (3 == sscanf(tmp.c_str(), "%d.%d.%d", &major, &minor, &patch))
         {
-            const int version = major * 10000 + minor * 100 + patch;
+            m_master_version = major * 10000 + minor * 100 + patch;
+            // since 5.6.4 storage for temporal types has changed
+            m_master_info.is_old_storage = m_master_version < 50604;
             static const int min_version = 50123;   // 5.1.23
-            if (version >= min_version)
+            if (m_master_version >= min_version)
                 return;
         }
         throw std::runtime_error("Slave::check_master_version(): got invalid version: " + tmp);
@@ -702,6 +733,44 @@ void Slave::check_master_binlog_format()
 
 
     throw std::runtime_error("Slave::check_binlog_format(): Could not SHOW GLOBAL VARIABLES LIKE 'binlog_format'");
+}
+
+void Slave::do_checksum_handshake(MYSQL* mysql)
+{
+    const char query[] = "SET @master_binlog_checksum= @@global.binlog_checksum";
+
+    if (mysql_real_query(mysql, query, static_cast<ulong>(strlen(query))))
+    {
+        if (mysql_errno(mysql) != ER_UNKNOWN_SYSTEM_VARIABLE)
+        {
+            mysql_free_result(mysql_store_result(mysql));
+            throw std::runtime_error("Slave::do_checksum_handshake(MYSQL* mysql): query 'SET @master_binlog_checksum= @@global.binlog_checksum' failed");
+        }
+        mysql_free_result(mysql_store_result(mysql));
+    }
+    else
+    {
+        mysql_free_result(mysql_store_result(mysql));
+        MYSQL_RES* master_res = nullptr;
+        MYSQL_ROW master_row = nullptr;
+        const char select_query[] = "SELECT @master_binlog_checksum";
+
+        if (!mysql_real_query(mysql, select_query, static_cast<ulong>(strlen(select_query))) &&
+            (master_res = mysql_store_result(mysql)) &&
+            (master_row = mysql_fetch_row(master_res)) &&
+            (master_row[0] != NULL))
+        {
+            m_master_info.checksum_alg = static_cast<enum_binlog_checksum_alg>(find_type(master_row[0], &binlog_checksum_typelib, 1) - 1);
+        }
+
+        if (master_res)
+            mysql_free_result(master_res);
+
+        if (m_master_info.checksum_alg != BINLOG_CHECKSUM_ALG_OFF && m_master_info.checksum_alg != BINLOG_CHECKSUM_ALG_CRC32)
+            throw std::runtime_error("Slave::do_checksum_handshake(MYSQL* mysql): unknown checksum algorithm");
+    }
+
+    LOG_TRACE(log, "Success doing checksum handshake");
 }
 
 
@@ -813,20 +882,49 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
 
         m_rli.setTableName(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
 
+        auto table = m_rli.getTable(std::make_pair(tmi.m_dbnam, tmi.m_tblnam));
+        if (table)
+        {
+            int i = 0;
+            for (const auto& x : tmi.m_cols_types)
+            {
+                switch (x)
+                {
+                case MYSQL_TYPE_TIMESTAMP:
+                case MYSQL_TYPE_DATETIME:
+                case MYSQL_TYPE_TIME:
+                    static_cast<Field_temporal*>(table->fields[i].get())->reset(true);
+                    break;
+                case MYSQL_TYPE_TIMESTAMP2:
+                case MYSQL_TYPE_DATETIME2:
+                case MYSQL_TYPE_TIME2:
+                    static_cast<Field_temporal*>(table->fields[i].get())->reset(false);
+                    break;
+                default:
+                    break;
+                }
+                i++;
+            }
+        }
+
         if (event_stat)
             event_stat->processTableMap(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
+
         break;
     }
 
+    case WRITE_ROWS_EVENT_V1:
+    case UPDATE_ROWS_EVENT_V1:
+    case DELETE_ROWS_EVENT_V1:
     case WRITE_ROWS_EVENT:
     case UPDATE_ROWS_EVENT:
     case DELETE_ROWS_EVENT:
     {
-        LOG_TRACE(log, "Got " << (bei.type == WRITE_ROWS_EVENT ? "WRITE" :
-                                  bei.type == DELETE_ROWS_EVENT ? "DELETE" :
+        LOG_TRACE(log, "Got " << (bei.type == WRITE_ROWS_EVENT_V1 || bei.type == WRITE_ROWS_EVENT ? "WRITE" :
+                                  bei.type == DELETE_ROWS_EVENT_V1 || bei.type == DELETE_ROWS_EVENT ? "DELETE" :
                                   "UPDATE") << "_ROWS_EVENT");
 
-        Row_event_info roi(bei.buf, bei.event_len, (bei.type == UPDATE_ROWS_EVENT));
+        Row_event_info roi(bei.buf, bei.event_len, (bei.type == UPDATE_ROWS_EVENT_V1 || bei.type == UPDATE_ROWS_EVENT), masterGe56());
 
         apply_row_event(m_rli, bei, roi, ext_state, event_stat);
 
@@ -874,7 +972,11 @@ ulong Slave::read_event(MYSQL* mysql)
     ulong len;
     ext_state.setStateProcessing(false);
 
+#if MYSQL_VERSION_ID < 50705
     len = cli_safe_read(mysql);
+#else
+    len = cli_safe_read(mysql, nullptr);
+#endif
 
     if (len == packet_error) {
         LOG_ERROR(log, "Myslave: Error reading packet from server: " << mysql_error(mysql)
@@ -950,7 +1052,7 @@ Slave::binlog_pos_t Slave::getLastBinlog() const
     conn.query(query);
     conn.store(res);
 
-    if (res.size() == 1 && res[0].size() == 4) {
+    if (res.size() == 1) {
 
         std::map<std::string,nanomysql::field>::const_iterator z = res[0].find("File");
 

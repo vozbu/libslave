@@ -19,7 +19,7 @@ namespace types
     typedef double              MY_DOUBLE;
     typedef double              MY_DECIMAL;
     typedef uint32_t            MY_DATE;
-    typedef uint32_t            MY_TIME;
+    typedef int32_t             MY_TIME;
     typedef unsigned long long  MY_DATETIME;
     typedef uint32_t            MY_TIMESTAMP;
     typedef std::string         MY_CHAR;
@@ -30,6 +30,9 @@ namespace types
 
     // NOTE you should call tzset directly or indirectly before using any of these functions
     // for proper initialization of daylight variable
+
+    // MY_TIME value is represented as a 32-bit number similar to this: [+/-]HHHMMSS (HHH - hours, MM - minutes, SS - seconds)
+    // with range from -8385959 to 8385959
 
     // Converts date from slave to timestamp assuming date is specified in local timezone.
     inline time_t date2time(MY_DATE date)
