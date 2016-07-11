@@ -569,6 +569,8 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
                 event_stat->tickModifyDone(roi.m_table_id, kind, now() - start);
             return;
         }
+        else if (event_stat)
+            event_stat->tickModifyFiltered(roi.m_table_id, kind);
     }
     if (event_stat)
         event_stat->tickModifyIgnored(roi.m_table_id, kind);

@@ -229,6 +229,9 @@ public:
     virtual void tickOther() {}
     // UPDATE/INSERT/DELETE missed (there are not callbacks on given type of operation).
     virtual void tickModifyIgnored(const unsigned long /*id*/, EventKind /*kind*/) {}
+    // UPDATE/INSERT/DELETE filtered (there are callbacks on other types of operations,
+    // but there are not on current type), subset of tickModifyIgnored
+    virtual void tickModifyFiltered(const unsigned long /*id*/, EventKind /*kind*/) {}
     // UPDATE/INSERT/DELETE successfully processed.
     virtual void tickModifyDone(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
     // UPDATE/INSERT/DELETE processed with errors (caught exception).
