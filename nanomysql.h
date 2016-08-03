@@ -111,6 +111,14 @@ public:
         {
             mysql_options(connection, MYSQL_OPT_WRITE_TIMEOUT, &write_timeout);
         }
+
+        mysql_ssl_set( connection
+                     , opts.mysql_ssl_key.empty() ? nullptr : opts.mysql_ssl_key.c_str()
+                     , opts.mysql_ssl_cert.empty() ? nullptr : opts.mysql_ssl_cert.c_str()
+                     , opts.mysql_ssl_ca.empty() ? nullptr : opts.mysql_ssl_ca.c_str()
+                     , nullptr
+                     , nullptr
+                     );
     }
 
     Connection(const mysql_conn_opts& opts)
