@@ -348,17 +348,10 @@ struct raii_mysql_connector
             throw std::runtime_error("Slave::reconnect() : mysql_init() : could not initialize mysql structure");
         }
 
-        unsigned int timeout = 60;
-
-        mysql_options(mysql, MYSQL_OPT_CONNECT_TIMEOUT, &timeout); //(const char*) slave_net_timeout.c_str());
-
-        /* Timeout for reads from server (works only for TCP/IP connections, and only for Windows prior to MySQL 4.1.22).
-         * You can this option so that a lost connection can be detected earlier than the TCP/IP
-         * Close_Wait_Timeout value of 10 minutes. Added in 4.1.1.
-         */
-        mysql_options(mysql, MYSQL_OPT_READ_TIMEOUT, &timeout); //(const char*) slave_net_timeout.c_str());
-
         bool was_error = reconnect;
+        const auto& sConnOptions = m_master_info.conn_options;
+        nanomysql::Connection::setOptions(mysql, sConnOptions);
+
         while (mysql_real_connect(mysql,
                                   sConnOptions.mysql_host.c_str(),
                                   sConnOptions.mysql_user.c_str(),
