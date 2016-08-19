@@ -386,7 +386,7 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
     if (colcnt != table->fields.size()) {
         LOG_ERROR(log, "Field count mismatch in unpacking row for "
                   << table->full_name << ": " << colcnt << " != " << table->fields.size());
-        return NULL;
+        throw std::runtime_error("unpack_row failed");
     }
 
 
