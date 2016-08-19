@@ -836,28 +836,31 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
 
         m_rli.setTableName(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
 
-        auto table = m_rli.getTable(std::make_pair(tmi.m_dbnam, tmi.m_tblnam));
-        if (table)
+        if (m_master_version >= 50604)
         {
-            int i = 0;
-            for (const auto& x : tmi.m_cols_types)
+            auto table = m_rli.getTable(std::make_pair(tmi.m_dbnam, tmi.m_tblnam));
+            if (table)
             {
-                switch (x)
+                int i = 0;
+                for (const auto& x : tmi.m_cols_types)
                 {
-                case MYSQL_TYPE_TIMESTAMP:
-                case MYSQL_TYPE_DATETIME:
-                case MYSQL_TYPE_TIME:
-                    static_cast<Field_temporal*>(table->fields[i].get())->reset(true);
-                    break;
-                case MYSQL_TYPE_TIMESTAMP2:
-                case MYSQL_TYPE_DATETIME2:
-                case MYSQL_TYPE_TIME2:
-                    static_cast<Field_temporal*>(table->fields[i].get())->reset(false);
-                    break;
-                default:
-                    break;
+                    switch (x)
+                    {
+                    case MYSQL_TYPE_TIMESTAMP:
+                    case MYSQL_TYPE_DATETIME:
+                    case MYSQL_TYPE_TIME:
+                        static_cast<Field_temporal*>(table->fields[i].get())->reset(true);
+                        break;
+                    case MYSQL_TYPE_TIMESTAMP2:
+                    case MYSQL_TYPE_DATETIME2:
+                    case MYSQL_TYPE_TIME2:
+                        static_cast<Field_temporal*>(table->fields[i].get())->reset(false);
+                        break;
+                    default:
+                        break;
+                    }
+                    i++;
                 }
-                i++;
             }
         }
 
