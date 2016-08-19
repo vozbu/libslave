@@ -580,11 +580,11 @@ namespace // anonymous
         }
 
         template <typename T>
-        void checkInsertValue(T t, const std::string& aValue, const std::string& aErrorMessage)
+        void checkInsertValue(T t, const std::string& aValue, const std::string& aErrorMessage, const std::string& aTable = "test")
         {
             check<T>([&t, &aErrorMessage](const Collector<T>& collector)
                      { collector.checkInsert(t, aErrorMessage); },
-                     "INSERT INTO test VALUES (" + aValue + ")", aErrorMessage, slave::eInsert);
+                     "INSERT INTO " + aTable + " VALUES (" + aValue + ")", aErrorMessage, slave::eInsert);
         }
 
         template<typename T> void checkInsert(const Line<T>& line)
@@ -1540,6 +1540,35 @@ namespace // anonymous
         if (0 != f.m_Callback.m_UnwantedCalls)
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
     }
+
+    void test_AlterCreateTable()
+    {
+        Fixture f;
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+        f.checkInsertValue(uint32_t(12321), "12321", "");
+
+        f.conn->query("ALTER TABLE test DROP COLUMN value, ADD COLUMN value varchar(50)");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "");
+
+        f.conn->query("ALTER TABLE test DROP COLUMN value, ADD COLUMN value int");
+        f.checkInsertValue(uint32_t(123456), "123456", "");
+
+        f.conn->query("DROP TABLE test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value varchar(10))");
+        f.checkInsertValue(std::string("TEST"), "'TEST'", "");
+
+        f.conn->query("DROP TABLE test");
+        f.conn->query("CREATE TABLE test (value int)");
+        f.checkInsertValue(uint32_t(11), "11", "");
+
+        f.conn->query("DROP TABLE IF EXISTS stat");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test.stat (value varchar(50))");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "", "stat");
+
+        f.conn->query("ALTER TABLE test.stat DROP COLUMN value, ADD COLUMN value int");
+        f.checkInsertValue(uint32_t(12321), "12321", "", "stat");
+    }
 }// anonymous-namespace
 
 test_suite* init_unit_test_suite(int argc, char* argv[])
@@ -1553,6 +1582,7 @@ test_suite* init_unit_test_suite(int argc, char* argv[])
     ADD_FIXTURE_TEST(test_Disconnect);
     ADD_FIXTURE_TEST(test_Stat);
     ADD_FIXTURE_TEST(test_BinlogRowImageOption);
+    ADD_FIXTURE_TEST(test_AlterCreateTable);
 
 #undef ADD_FIXTURE_TEST
 
