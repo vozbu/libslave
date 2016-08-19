@@ -839,7 +839,7 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
         if (m_master_version >= 50604)
         {
             auto table = m_rli.getTable(std::make_pair(tmi.m_dbnam, tmi.m_tblnam));
-            if (table)
+            if (table && tmi.m_cols_types.size() == table->fields.size())
             {
                 int i = 0;
                 for (const auto& x : tmi.m_cols_types)
