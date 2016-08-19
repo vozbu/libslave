@@ -84,6 +84,7 @@ Query_event_info::Query_event_info(const char* buf, unsigned int event_len) {
 
     size_t data_len = event_len - (LOG_EVENT_HEADER_LEN + QUERY_HEADER_LEN) - status_vars_len;
 
+    db_name.assign(buf + LOG_EVENT_HEADER_LEN + QUERY_HEADER_LEN + status_vars_len, db_len);
     query.assign(buf + LOG_EVENT_HEADER_LEN + QUERY_HEADER_LEN + status_vars_len + db_len + 1,
                  data_len - db_len - 1);
 }

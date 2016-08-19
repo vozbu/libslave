@@ -169,6 +169,7 @@ struct Rotate_event_info {
 
 struct Query_event_info {
 
+    std::string db_name;
     std::string query;
 
     Query_event_info(const char* buf, unsigned int event_len);

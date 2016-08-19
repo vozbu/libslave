@@ -13,7 +13,7 @@
 */
 
 
-
+#include <regex>
 #include "Slave.h"
 #include "SlaveStats.h"
 
@@ -775,74 +775,16 @@ void Slave::do_checksum_handshake(MYSQL* mysql)
 
 
 
-// This will check if a QUERY_EVENT holds an "ALTER TABLE ..." string.
 namespace
 {
-static bool checkAlterQuery(const std::string& str)
+std::string checkAlterOrCreateQuery(const std::string& str)
 {
-    //RegularExpression regexp("^\\s*ALTER\\s+TABLE)", RegularExpression::RE_CASELESS);
-
-    enum {
-        SP0, _A0, _L0, _T0, _E0, _R, SP1, _T1, _A1, _B, _L1, _E1
-    } state = SP0;
-
-
-    for (std::string::const_iterator i = str.begin(); i != str.end(); ++i) {
-
-        if (state == SP0 && (*i == ' ' || *i == '\t' || *i == '\r' || *i == '\n')) {
-
-        } else if (state == SP0 && (*i == 'a' || *i == 'A')) {
-            state = _A0;
-
-        } else if (state == _A0 && (*i == 'l' || *i == 'L')) {
-            state = _L0;
-
-        } else if (state == _L0 && (*i == 't' || *i == 'T')) {
-            state = _T0;
-
-        } else if (state == _T0 && (*i == 'e' || *i == 'E')) {
-            state = _E0;
-
-        } else if (state == _E0 && (*i == 'r' || *i == 'R')) {
-            state = _R;
-
-        } else if (state == _R && (*i == ' ' || *i == '\t' || *i == '\r' || *i == '\n')) {
-            state = SP1;
-
-        } else if (state == SP1 && (*i == ' ' || *i == '\t' || *i == '\r' || *i == '\n')) {
-
-        } else if (state == SP1 && (*i == 't' || *i == 'T')) {
-            state = _T1;
-
-        } else if (state == _T1 && (*i == 'a' || *i == 'A')) {
-            state = _A1;
-
-        } else if (state == _A1 && (*i == 'b' || *i == 'B')) {
-            state = _B;
-
-        } else if (state == _B && (*i == 'l' || *i == 'L')) {
-            state = _L1;
-
-        } else if (state == _L1 && (*i == 'e' || *i == 'E')) {
-            state = _E1;
-
-        } else if (state == _E1) {
-            return true;
-
-        } else {
-            return false;
-        }
-    }
-
-    return false;
-}
-
-
-bool checkCreateQuery(const std::string& str)
-{
-    if (0 == ::strncasecmp("create table ", str.c_str(), 13))
-        return true;
-    return false;
+    static const std::regex query_regex(R"(\s*(?:alter\s+table|create\s+table(?:\s+if\s+not\s+exists)?)\s+(?:\w+\.)?(\w+)(?:[^\w\.].*$|$))",
+                                        std::regex_constants::optimize | std::regex_constants::icase);
+    std::smatch sm;
+    if (std::regex_match(str, sm, query_regex))
+        return sm[1];
+    return "";
 }
 }// anonymouos-namespace
 
@@ -860,16 +802,28 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
 
     case QUERY_EVENT:
     {
-        // Check for an ALTER TABLE
+        // Check for ALTER TABLE or CREATE TABLE
 
         slave::Query_event_info qei(bei.buf, bei.event_len);
 
         LOG_TRACE(log, "Received QUERY_EVENT: " << qei.query);
 
-        if (checkAlterQuery(qei.query) || checkCreateQuery(qei.query)) {
-
-            LOG_DEBUG(log, "Rebuilding database structure.");
-            createDatabaseStructure();
+        const auto tbl_name = checkAlterOrCreateQuery(qei.query);
+        if (!tbl_name.empty())
+        {
+            const auto key = std::make_pair(qei.db_name, tbl_name);
+            if (m_table_order.count(key) == 1)
+            {
+                LOG_DEBUG(log, "Rebuilding database structure.");
+                table_order_t order {key};
+                createDatabaseStructure_(order, m_rli);
+                auto it = m_rli.m_table_map.find(key);
+                if (it != m_rli.m_table_map.end())
+                {
+                    it->second->m_callback = m_callbacks[key];
+                    it->second->m_filter = m_filters[key];
+                }
+            }
         }
         break;
     }
