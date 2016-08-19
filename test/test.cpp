@@ -211,10 +211,10 @@ int main(int argc, char** argv)
 
     slave::MasterInfo masterinfo;
 
-    masterinfo.host = host;
-    masterinfo.port = port;
-    masterinfo.user = user;
-    masterinfo.password = password;
+    masterinfo.conn_options.mysql_host = host;
+    masterinfo.conn_options.mysql_port = port;
+    masterinfo.conn_options.mysql_user = user;
+    masterinfo.conn_options.mysql_pass = password;
     signal(SIGINT, sighandler);
     signal(SIGTERM, sighandler);
 

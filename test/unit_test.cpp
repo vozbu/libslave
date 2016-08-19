@@ -369,19 +369,20 @@ namespace // anonymous
         {
             cfg.load(TestDataDir + "mysql.conf");
 
-            conn.reset(new nanomysql::Connection(cfg.mysql_host, cfg.mysql_user, cfg.mysql_pass, cfg.mysql_db));
+            slave::MasterInfo sMasterInfo;
+            sMasterInfo.conn_options.mysql_host = cfg.mysql_host;
+            sMasterInfo.conn_options.mysql_port = cfg.mysql_port;
+            sMasterInfo.conn_options.mysql_user = cfg.mysql_user;
+            sMasterInfo.conn_options.mysql_pass = cfg.mysql_pass;
+            sMasterInfo.conn_options.mysql_db = cfg.mysql_db;
+
+            conn.reset(new nanomysql::Connection(sMasterInfo.conn_options));
             conn->query("set names utf8");
             conn->query("set time_zone='+3:00'");
             // Create table, because if it does not exist, libslave will swear the lack of it, and test will finished.
             conn->query("CREATE TABLE IF NOT EXISTS test (tmp int)");
             // Create another table for testing map_detailed stat.
             conn->query("CREATE TABLE IF NOT EXISTS stat (tmp int)");
-
-            slave::MasterInfo sMasterInfo;
-            sMasterInfo.host = cfg.mysql_host;
-            sMasterInfo.port = cfg.mysql_port;
-            sMasterInfo.user = cfg.mysql_user;
-            sMasterInfo.password = cfg.mysql_pass;
 
             m_Slave.setMasterInfo(sMasterInfo);
             m_Slave.linkEventStat(&m_SlaveStat);

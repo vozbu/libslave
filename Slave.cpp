@@ -122,8 +122,7 @@ void Slave::createDatabaseStructure_(table_order_t& tabs, RelayLogInfo& rli) con
 {
     LOG_TRACE(log, "enter: createDatabaseStructure");
 
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
+    nanomysql::Connection conn(m_master_info.conn_options);
     const collate_map_t collate_map = readCollateMap(conn);
 
 
@@ -361,15 +360,15 @@ struct raii_mysql_connector
 
         bool was_error = reconnect;
         while (mysql_real_connect(mysql,
-                                  m_master_info.host.c_str(),
-                                  m_master_info.user.c_str(),
-                                  m_master_info.password.c_str(), 0, m_master_info.port, 0, CLIENT_REMEMBER_OPTIONS)
+                                  sConnOptions.mysql_host.c_str(),
+                                  sConnOptions.mysql_user.c_str(),
+                                  sConnOptions.mysql_pass.c_str(), 0, sConnOptions.mysql_port, 0, CLIENT_REMEMBER_OPTIONS)
                == 0) {
 
 
             ext_state.setConnecting();
             if(!was_error) {
-                LOG_ERROR(log, "Couldn't connect to mysql master " << m_master_info.host << ":" << m_master_info.port);
+                LOG_ERROR(log, "Couldn't connect to mysql master " << sConnOptions.mysql_host << ":" << sConnOptions.mysql_port);
                 was_error = true;
             }
 
@@ -381,7 +380,7 @@ struct raii_mysql_connector
         }
 
         if(was_error)
-            LOG_INFO(log, "Successfully connected to " << m_master_info.host << ":" << m_master_info.port);
+            LOG_INFO(log, "Successfully connected to " << sConnOptions.mysql_host << ":" << m_master_info.mysql_port);
 
 
         mysql->reconnect = 1;
@@ -581,9 +580,7 @@ connected:
 std::map<std::string,std::string> Slave::getRowType(const std::string& db_name,
                                                     const std::set<std::string>& tbl_names) const
 {
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
-
+    nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
 
     conn.query("SHOW TABLE STATUS FROM " + db_name);
@@ -677,9 +674,7 @@ void Slave::deregister_slave_on_master(MYSQL* mysql)
 
 void Slave::check_master_version()
 {
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
-
+    nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
 
     conn.query("SELECT VERSION()");
@@ -706,9 +701,7 @@ void Slave::check_master_version()
 
 void Slave::check_master_binlog_format()
 {
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
-
+    nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
 
     conn.query("SHOW GLOBAL VARIABLES LIKE 'binlog_format'");
@@ -957,9 +950,7 @@ void Slave::generateSlaveId()
 
     std::set<unsigned int> server_ids;
 
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
-
+    nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
 
     conn.query("SHOW SLAVE HOSTS");
@@ -996,11 +987,7 @@ void Slave::generateSlaveId()
 
 Slave::binlog_pos_t Slave::getLastBinlog() const
 {
-
-
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
-
+    nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
 
     static const std::string query = "SHOW MASTER STATUS";
