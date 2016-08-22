@@ -23,6 +23,21 @@
 
 namespace nanomysql {
 
+struct mysql_conn_opts
+{
+    std::string mysql_host;
+    int         mysql_port              = 3306;
+    std::string mysql_db;
+    std::string mysql_user;
+    std::string mysql_pass;
+    std::string mysql_ssl_ca;
+    std::string mysql_ssl_cert;
+    std::string mysql_ssl_key;
+    unsigned int mysql_connect_timeout  = 10;
+    unsigned int mysql_read_timeout     = 60 * 15;
+    unsigned int mysql_write_timeout    = 60 * 15;
+};
+
 class Connection {
 
     MYSQL* m_conn;
@@ -53,45 +68,62 @@ class Connection {
         ~_mysql_res_wrap() { if (s != NULL) ::mysql_free_result(s); }
     };
 
-    void init_(const std::string& host, const std::string& user, const std::string& password,
-               const std::string& db, int port)
+    void connect(const mysql_conn_opts& opts)
     {
         m_conn = ::mysql_init(NULL);
 
         if (!m_conn)
             throw std::runtime_error("Could not mysql_init()");
 
-        if (::mysql_real_connect(m_conn, host.c_str(), user.c_str(), password.c_str(), db.c_str(), port, NULL, 0) == NULL) {
+        setOptions(m_conn, opts);
+
+        if (::mysql_real_connect(m_conn
+                               , opts.mysql_host.c_str()
+                               , opts.mysql_user.c_str()
+                               , opts.mysql_pass.c_str()
+                               , opts.mysql_db.c_str()
+                               , opts.mysql_port, NULL, 0
+                                ) == NULL)
+        {
             throw_error("Could not mysql_real_connect()");
         }
     }
 
 public:
-
-    struct Attributes {
-        std::string host;
-        std::string user;
-        std::string password;
-        std::string db;
-        int port;
-
-        Attributes() : port(0) {}
-
-        Attributes(const std::string& _host, const std::string& _user, const std::string& _password,
-               const std::string& _db = "", int _port = 0) :
-            host(_host), user(_user), password(_password), db(_db), port(_port)
-        {}
-    };
-
-    Connection(const Attributes &attr)
+    static void setOptions(MYSQL* connection, const mysql_conn_opts& opts)
     {
-        init_(attr.host, attr.user, attr.password, attr.db, attr.port);
+        const unsigned int connect_timeout = opts.mysql_connect_timeout;
+        const unsigned int read_timeout = opts.mysql_read_timeout;
+        const unsigned int write_timeout = opts.mysql_write_timeout;
+        if (connect_timeout > 0)
+        {
+            mysql_options(connection, MYSQL_OPT_CONNECT_TIMEOUT, &connect_timeout);
+        }
+        /* Timeout for reads from server (works only for TCP/IP connections, and only for Windows prior to MySQL 4.1.22).
+         * You can this option so that a lost connection can be detected earlier than the TCP/IP
+         * Close_Wait_Timeout value of 10 minutes. Added in 4.1.1.
+         */
+        if (read_timeout > 0)
+        {
+            mysql_options(connection, MYSQL_OPT_READ_TIMEOUT, &read_timeout);
+        }
+        if (write_timeout > 0)
+        {
+            mysql_options(connection, MYSQL_OPT_WRITE_TIMEOUT, &write_timeout);
+        }
+
+        mysql_ssl_set( connection
+                     , opts.mysql_ssl_key.empty() ? nullptr : opts.mysql_ssl_key.c_str()
+                     , opts.mysql_ssl_cert.empty() ? nullptr : opts.mysql_ssl_cert.c_str()
+                     , opts.mysql_ssl_ca.empty() ? nullptr : opts.mysql_ssl_ca.c_str()
+                     , nullptr
+                     , nullptr
+                     );
     }
 
-    Connection(const std::string& host, const std::string& user, const std::string& password,
-               const std::string& db = "", int port = 0)
+    Connection(const mysql_conn_opts& opts)
     {
-        init_(host, user, password, db, port);
+        connect(opts);
     }
 
     ~Connection()

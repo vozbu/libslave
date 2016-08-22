@@ -84,6 +84,7 @@ Query_event_info::Query_event_info(const char* buf, unsigned int event_len) {
 
     size_t data_len = event_len - (LOG_EVENT_HEADER_LEN + QUERY_HEADER_LEN) - status_vars_len;
 
+    db_name.assign(buf + LOG_EVENT_HEADER_LEN + QUERY_HEADER_LEN + status_vars_len, db_len);
     query.assign(buf + LOG_EVENT_HEADER_LEN + QUERY_HEADER_LEN + status_vars_len + db_len + 1,
                  data_len - db_len - 1);
 }
@@ -385,7 +386,7 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
     if (colcnt != table->fields.size()) {
         LOG_ERROR(log, "Field count mismatch in unpacking row for "
                   << table->full_name << ": " << colcnt << " != " << table->fields.size());
-        return NULL;
+        throw std::runtime_error("unpack_row failed");
     }
 
 
@@ -569,6 +570,8 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
                 event_stat->tickModifyDone(roi.m_table_id, kind, now() - start);
             return;
         }
+        else if (event_stat)
+            event_stat->tickModifyFiltered(roi.m_table_id, kind);
     }
     if (event_stat)
         event_stat->tickModifyIgnored(roi.m_table_id, kind);

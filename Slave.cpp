@@ -13,7 +13,7 @@
 */
 
 
-
+#include <regex>
 #include "Slave.h"
 #include "SlaveStats.h"
 
@@ -122,8 +122,7 @@ void Slave::createDatabaseStructure_(table_order_t& tabs, RelayLogInfo& rli) con
 {
     LOG_TRACE(log, "enter: createDatabaseStructure");
 
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
+    nanomysql::Connection conn(m_master_info.conn_options);
     const collate_map_t collate_map = readCollateMap(conn);
 
 
@@ -349,27 +348,20 @@ struct raii_mysql_connector
             throw std::runtime_error("Slave::reconnect() : mysql_init() : could not initialize mysql structure");
         }
 
-        unsigned int timeout = 60;
-
-        mysql_options(mysql, MYSQL_OPT_CONNECT_TIMEOUT, &timeout); //(const char*) slave_net_timeout.c_str());
-
-        /* Timeout for reads from server (works only for TCP/IP connections, and only for Windows prior to MySQL 4.1.22).
-         * You can this option so that a lost connection can be detected earlier than the TCP/IP
-         * Close_Wait_Timeout value of 10 minutes. Added in 4.1.1.
-         */
-        mysql_options(mysql, MYSQL_OPT_READ_TIMEOUT, &timeout); //(const char*) slave_net_timeout.c_str());
-
         bool was_error = reconnect;
+        const auto& sConnOptions = m_master_info.conn_options;
+        nanomysql::Connection::setOptions(mysql, sConnOptions);
+
         while (mysql_real_connect(mysql,
-                                  m_master_info.host.c_str(),
-                                  m_master_info.user.c_str(),
-                                  m_master_info.password.c_str(), 0, m_master_info.port, 0, CLIENT_REMEMBER_OPTIONS)
+                                  sConnOptions.mysql_host.c_str(),
+                                  sConnOptions.mysql_user.c_str(),
+                                  sConnOptions.mysql_pass.c_str(), 0, sConnOptions.mysql_port, 0, CLIENT_REMEMBER_OPTIONS)
                == 0) {
 
 
             ext_state.setConnecting();
             if(!was_error) {
-                LOG_ERROR(log, "Couldn't connect to mysql master " << m_master_info.host << ":" << m_master_info.port);
+                LOG_ERROR(log, "Couldn't connect to mysql master " << sConnOptions.mysql_host << ":" << sConnOptions.mysql_port);
                 was_error = true;
             }
 
@@ -381,7 +373,7 @@ struct raii_mysql_connector
         }
 
         if(was_error)
-            LOG_INFO(log, "Successfully connected to " << m_master_info.host << ":" << m_master_info.port);
+            LOG_INFO(log, "Successfully connected to " << sConnOptions.mysql_host << ":" << m_master_info.mysql_port);
 
 
         mysql->reconnect = 1;
@@ -581,9 +573,7 @@ connected:
 std::map<std::string,std::string> Slave::getRowType(const std::string& db_name,
                                                     const std::set<std::string>& tbl_names) const
 {
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
-
+    nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
 
     conn.query("SHOW TABLE STATUS FROM " + db_name);
@@ -677,9 +667,7 @@ void Slave::deregister_slave_on_master(MYSQL* mysql)
 
 void Slave::check_master_version()
 {
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
-
+    nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
 
     conn.query("SELECT VERSION()");
@@ -706,9 +694,7 @@ void Slave::check_master_version()
 
 void Slave::check_master_binlog_format()
 {
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
-
+    nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
 
     conn.query("SHOW GLOBAL VARIABLES LIKE 'binlog_format'");
@@ -775,74 +761,16 @@ void Slave::do_checksum_handshake(MYSQL* mysql)
 
 
 
-// This will check if a QUERY_EVENT holds an "ALTER TABLE ..." string.
 namespace
 {
-static bool checkAlterQuery(const std::string& str)
+std::string checkAlterOrCreateQuery(const std::string& str)
 {
-    //RegularExpression regexp("^\\s*ALTER\\s+TABLE)", RegularExpression::RE_CASELESS);
-
-    enum {
-        SP0, _A0, _L0, _T0, _E0, _R, SP1, _T1, _A1, _B, _L1, _E1
-    } state = SP0;
-
-
-    for (std::string::const_iterator i = str.begin(); i != str.end(); ++i) {
-
-        if (state == SP0 && (*i == ' ' || *i == '\t' || *i == '\r' || *i == '\n')) {
-
-        } else if (state == SP0 && (*i == 'a' || *i == 'A')) {
-            state = _A0;
-
-        } else if (state == _A0 && (*i == 'l' || *i == 'L')) {
-            state = _L0;
-
-        } else if (state == _L0 && (*i == 't' || *i == 'T')) {
-            state = _T0;
-
-        } else if (state == _T0 && (*i == 'e' || *i == 'E')) {
-            state = _E0;
-
-        } else if (state == _E0 && (*i == 'r' || *i == 'R')) {
-            state = _R;
-
-        } else if (state == _R && (*i == ' ' || *i == '\t' || *i == '\r' || *i == '\n')) {
-            state = SP1;
-
-        } else if (state == SP1 && (*i == ' ' || *i == '\t' || *i == '\r' || *i == '\n')) {
-
-        } else if (state == SP1 && (*i == 't' || *i == 'T')) {
-            state = _T1;
-
-        } else if (state == _T1 && (*i == 'a' || *i == 'A')) {
-            state = _A1;
-
-        } else if (state == _A1 && (*i == 'b' || *i == 'B')) {
-            state = _B;
-
-        } else if (state == _B && (*i == 'l' || *i == 'L')) {
-            state = _L1;
-
-        } else if (state == _L1 && (*i == 'e' || *i == 'E')) {
-            state = _E1;
-
-        } else if (state == _E1) {
-            return true;
-
-        } else {
-            return false;
-        }
-    }
-
-    return false;
-}
-
-
-bool checkCreateQuery(const std::string& str)
-{
-    if (0 == ::strncasecmp("create table ", str.c_str(), 13))
-        return true;
-    return false;
+    static const std::regex query_regex(R"(\s*(?:alter\s+table|create\s+table(?:\s+if\s+not\s+exists)?)\s+(?:\w+\.)?(\w+)(?:[^\w\.].*$|$))",
+                                        std::regex_constants::optimize | std::regex_constants::icase);
+    std::smatch sm;
+    if (std::regex_match(str, sm, query_regex))
+        return sm[1];
+    return "";
 }
 }// anonymouos-namespace
 
@@ -860,16 +788,28 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
 
     case QUERY_EVENT:
     {
-        // Check for an ALTER TABLE
+        // Check for ALTER TABLE or CREATE TABLE
 
         slave::Query_event_info qei(bei.buf, bei.event_len);
 
         LOG_TRACE(log, "Received QUERY_EVENT: " << qei.query);
 
-        if (checkAlterQuery(qei.query) || checkCreateQuery(qei.query)) {
-
-            LOG_DEBUG(log, "Rebuilding database structure.");
-            createDatabaseStructure();
+        const auto tbl_name = checkAlterOrCreateQuery(qei.query);
+        if (!tbl_name.empty())
+        {
+            const auto key = std::make_pair(qei.db_name, tbl_name);
+            if (m_table_order.count(key) == 1)
+            {
+                LOG_DEBUG(log, "Rebuilding database structure.");
+                table_order_t order {key};
+                createDatabaseStructure_(order, m_rli);
+                auto it = m_rli.m_table_map.find(key);
+                if (it != m_rli.m_table_map.end())
+                {
+                    it->second->m_callback = m_callbacks[key];
+                    it->second->m_filter = m_filters[key];
+                }
+            }
         }
         break;
     }
@@ -882,28 +822,31 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
 
         m_rli.setTableName(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
 
-        auto table = m_rli.getTable(std::make_pair(tmi.m_dbnam, tmi.m_tblnam));
-        if (table)
+        if (m_master_version >= 50604)
         {
-            int i = 0;
-            for (const auto& x : tmi.m_cols_types)
+            auto table = m_rli.getTable(std::make_pair(tmi.m_dbnam, tmi.m_tblnam));
+            if (table && tmi.m_cols_types.size() == table->fields.size())
             {
-                switch (x)
+                int i = 0;
+                for (const auto& x : tmi.m_cols_types)
                 {
-                case MYSQL_TYPE_TIMESTAMP:
-                case MYSQL_TYPE_DATETIME:
-                case MYSQL_TYPE_TIME:
-                    static_cast<Field_temporal*>(table->fields[i].get())->reset(true);
-                    break;
-                case MYSQL_TYPE_TIMESTAMP2:
-                case MYSQL_TYPE_DATETIME2:
-                case MYSQL_TYPE_TIME2:
-                    static_cast<Field_temporal*>(table->fields[i].get())->reset(false);
-                    break;
-                default:
-                    break;
+                    switch (x)
+                    {
+                    case MYSQL_TYPE_TIMESTAMP:
+                    case MYSQL_TYPE_DATETIME:
+                    case MYSQL_TYPE_TIME:
+                        static_cast<Field_temporal*>(table->fields[i].get())->reset(true);
+                        break;
+                    case MYSQL_TYPE_TIMESTAMP2:
+                    case MYSQL_TYPE_DATETIME2:
+                    case MYSQL_TYPE_TIME2:
+                        static_cast<Field_temporal*>(table->fields[i].get())->reset(false);
+                        break;
+                    default:
+                        break;
+                    }
+                    i++;
                 }
-                i++;
             }
         }
 
@@ -1000,9 +943,7 @@ void Slave::generateSlaveId()
 
     std::set<unsigned int> server_ids;
 
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
-
+    nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
 
     conn.query("SHOW SLAVE HOSTS");
@@ -1039,11 +980,7 @@ void Slave::generateSlaveId()
 
 Slave::binlog_pos_t Slave::getLastBinlog() const
 {
-
-
-    nanomysql::Connection conn(m_master_info.host.c_str(), m_master_info.user.c_str(),
-                               m_master_info.password.c_str(), "", m_master_info.port);
-
+    nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
 
     static const std::string query = "SHOW MASTER STATUS";

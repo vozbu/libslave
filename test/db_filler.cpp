@@ -17,7 +17,7 @@ void usage(const char* name)
               << " -s <short_table> -l <long_table> -b <bulk size> -c <bulk count>" << std::endl;
 }
 
-void createTable(const nanomysql::Connection::Attributes& opts, const std::string& aTableName,
+void createTable(const nanomysql::mysql_conn_opts& opts, const std::string& aTableName,
                  unsigned bulk_size, unsigned bulk_count,
                  const std::string& aTableDesc,
                  const std::string& aQueryStart, const std::string& aQueryPart,
@@ -31,7 +31,7 @@ void createTable(const nanomysql::Connection::Attributes& opts, const std::strin
 
     std::cerr << ::time(NULL) << " Getting slave current position..." << std::endl;
 
-    slave::MasterInfo sMasterInfo(opts.host, opts.port, opts.user, opts.password, 10);
+    slave::MasterInfo sMasterInfo(opts, 10);
     slave::Slave sSlave(sMasterInfo);
 
     slave::Slave::binlog_pos_t sBinlogPos = sSlave.getLastBinlog();
@@ -81,7 +81,7 @@ void createTable(const nanomysql::Connection::Attributes& opts, const std::strin
 
 int main(int argc, char** argv)
 {
-    nanomysql::Connection::Attributes opts;
+    nanomysql::mysql_conn_opts opts;
     std::string short_table;
     std::string long_table;
     unsigned int bulk_size = 0;
@@ -92,11 +92,11 @@ int main(int argc, char** argv)
     {
         switch (c)
         {
-        case 'h': opts.host = optarg; break;
-        case 'u': opts.user = optarg; break;
-        case 'p': opts.password = optarg; break;
-        case 'd': opts.db = optarg; break;
-        case 'P': opts.port = std::stoi(optarg); break;
+        case 'h': opts.mysql_host = optarg; break;
+        case 'u': opts.mysql_user = optarg; break;
+        case 'p': opts.mysql_pass= optarg; break;
+        case 'd': opts.mysql_db = optarg; break;
+        case 'P': opts.mysql_port = std::stoi(optarg); break;
         case 's': short_table = optarg; break;
         case 'l': long_table = optarg; break;
         case 'b': bulk_size = std::stoi(optarg); break;
@@ -107,7 +107,8 @@ int main(int argc, char** argv)
         }
     }
 
-    if (opts.host.empty() || opts.user.empty() || opts.db.empty() || (short_table.empty() && long_table.empty()) || 0 == bulk_size || 0 == bulk_count)
+    if (opts.mysql_host.empty() || opts.mysql_user.empty() || opts.mysql_db.empty() ||
+        (short_table.empty() && long_table.empty()) || 0 == bulk_size || 0 == bulk_count)
     {
         usage(argv[0]);
         return 1;

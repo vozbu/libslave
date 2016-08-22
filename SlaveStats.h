@@ -31,6 +31,8 @@
 #include <string>
 #include <sys/time.h>
 
+#include "nanomysql.h"
+
 
 namespace slave
 {
@@ -45,28 +47,19 @@ enum enum_binlog_checksum_alg
 
 struct MasterInfo {
 
-    std::string host;
-    unsigned int port;
-    std::string user;
-    std::string password;
+    nanomysql::mysql_conn_opts conn_options;
     std::string master_log_name;
-    unsigned long master_log_pos;
+    unsigned long master_log_pos = 0;
     unsigned int connect_retry;
     enum_binlog_checksum_alg checksum_alg = BINLOG_CHECKSUM_ALG_OFF;
     bool is_old_storage = true;
 
-    MasterInfo() : port(3306), master_log_pos(0), connect_retry(10) {}
+    MasterInfo() : connect_retry(10) {}
 
-    MasterInfo(std::string host_, unsigned int port_, std::string user_,
-               std::string password_, unsigned int connect_retry_) :
-        host(host_),
-        port(port_),
-        user(user_),
-        password(password_),
-        master_log_name(),
-        master_log_pos(0),
-        connect_retry(connect_retry_)
-        {}
+    MasterInfo(const nanomysql::mysql_conn_opts& conn_options_, unsigned int connect_retry_)
+        : conn_options(conn_options_)
+        , connect_retry(connect_retry_)
+    {}
 
     bool checksumEnabled() const { return checksum_alg == BINLOG_CHECKSUM_ALG_CRC32; }
 };
@@ -229,6 +222,9 @@ public:
     virtual void tickOther() {}
     // UPDATE/INSERT/DELETE missed (there are not callbacks on given type of operation).
     virtual void tickModifyIgnored(const unsigned long /*id*/, EventKind /*kind*/) {}
+    // UPDATE/INSERT/DELETE filtered (there are callbacks on other types of operations,
+    // but there are not on current type), subset of tickModifyIgnored
+    virtual void tickModifyFiltered(const unsigned long /*id*/, EventKind /*kind*/) {}
     // UPDATE/INSERT/DELETE successfully processed.
     virtual void tickModifyDone(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
     // UPDATE/INSERT/DELETE processed with errors (caught exception).

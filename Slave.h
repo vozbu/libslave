@@ -43,7 +43,7 @@ class Slave
 {
 public:
 
-    typedef std::vector<std::pair<std::string, std::string> > table_order_t;
+    typedef std::set<std::pair<std::string, std::string>> table_order_t;
     typedef std::map<std::pair<std::string, std::string>, callback> callbacks_t;
     typedef std::map<std::pair<std::string, std::string>, filter> filters_t;
 
@@ -101,7 +101,7 @@ public:
                      EventKind filter = eAll)
     {
         const std::pair<std::string, std::string> key = std::make_pair(_db_name, _tbl_name);
-        m_table_order.push_back(key);
+        m_table_order.insert(key);
         m_callbacks[key] = _callback;
         m_filters[key] = filter;
 
