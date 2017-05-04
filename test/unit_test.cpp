@@ -1569,6 +1569,20 @@ namespace // anonymous
 
         f.conn->query("ALTER TABLE test.stat DROP COLUMN value, ADD COLUMN value int");
         f.checkInsertValue(uint32_t(12321), "12321", "", "stat");
+
+        f.conn->query("DROP TABLE IF EXISTS stat");
+        f.conn->query("CREATE TABLE IF NOT EXISTS `stat` (value int)");
+        f.checkInsertValue(uint32_t(12), "12", "", "stat");
+
+        f.conn->query("ALTER TABLE `test`.`stat` DROP COLUMN `value`, ADD COLUMN `value` varchar(50)");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "", "stat");
+
+        f.conn->query("DROP TABLE IF EXISTS stat");
+        f.conn->query("CREATE TABLE IF NOT EXISTS `stat`\n(value varchar(50))");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "", "stat");
+
+        f.conn->query("ALTER TABLE `stat` \n    DROP COLUMN `value`,\n    ADD COLUMN value int");
+        f.checkInsertValue(uint32_t(12), "12", "", "stat");
     }
 }// anonymous-namespace
 
