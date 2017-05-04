@@ -13,7 +13,10 @@
 */
 
 
+#include <algorithm>
 #include <regex>
+#include <string>
+
 #include "Slave.h"
 #include "SlaveStats.h"
 
@@ -765,10 +768,14 @@ namespace
 {
 std::string checkAlterOrCreateQuery(const std::string& str)
 {
-    static const std::regex query_regex(R"(\s*(?:alter\s+table|create\s+table(?:\s+if\s+not\s+exists)?)\s+(?:\w+\.)?(\w+)(?:[^\w\.].*$|$))",
+    static const std::regex query_regex(R"(\s*(?:alter\s+table|create\s+table(?:\s+if\s+not\s+exists)?)\s+(?:`?\w+`?\.)?`?(\w+)`?(?:[^\w\.`].*$|$))",
                                         std::regex_constants::optimize | std::regex_constants::icase);
+
+    std::string s;
+    std::replace_copy(str.begin(), str.end(), std::back_inserter(s), '\n', ' ');
+
     std::smatch sm;
-    if (std::regex_match(str, sm, query_regex))
+    if (std::regex_match(s, sm, query_regex))
         return sm[1];
     return "";
 }
