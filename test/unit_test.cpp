@@ -216,14 +216,7 @@ namespace // anonymous
             {
                 ++events_modify;
 
-                Counter sCounter;
-                if (map_kind.find(kind) == map_kind.end())
-                    map_kind[kind] = sCounter;
-
                 const auto key = std::make_pair(id, kind);
-                if (map_detailed.find(key) == map_detailed.end())
-                    map_detailed[key] = sCounter;
-
                 map_kind[kind].ignored    += 1;
                 map_detailed[key].ignored += 1;
             }
@@ -232,14 +225,7 @@ namespace // anonymous
             {
                 ++events_modify;
 
-                Counter sCounter;
-                if (map_kind.find(kind) == map_kind.end())
-                    map_kind[kind] = sCounter;
-
                 const auto key = std::make_pair(id, kind);
-                if (map_detailed.find(key) == map_detailed.end())
-                    map_detailed[key] = sCounter;
-
                 map_kind[kind].done    += 1;
                 map_detailed[key].done += 1;
             }
@@ -248,14 +234,7 @@ namespace // anonymous
             {
                 ++events_modify;
 
-                Counter sCounter;
-                if (map_kind.find(kind) == map_kind.end())
-                    map_kind[kind] = sCounter;
-
                 const auto key = std::make_pair(id, kind);
-                if (map_detailed.find(key) == map_detailed.end())
-                    map_detailed[key] = sCounter;
-
                 map_kind[kind].failed    += 1;
                 map_detailed[key].failed += 1;
             }

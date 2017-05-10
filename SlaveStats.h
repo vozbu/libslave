@@ -169,20 +169,6 @@ private:
     unsigned long   intransaction_pos;
 };
 
-// Saves ExtStateIface or it's descendants.
-// Used in singleton.
-struct StateHolder {
-    typedef std::shared_ptr<ExtStateIface> PExtState;
-    PExtState ext_state;
-    StateHolder() :
-        ext_state(new EmptyExtState)
-    {}
-    ExtStateIface& operator()()
-    {
-        return *ext_state;
-    }
-};
-
 enum EventKind
 {
     eNone   = 0,

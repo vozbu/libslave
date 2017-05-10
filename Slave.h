@@ -159,9 +159,6 @@ protected:
 
     ulong read_event(MYSQL* mysql);
 
-    std::map<std::string,std::string> getRowType(const std::string& db_name,
-                                                 const std::set<std::string>& tbl_names) const;
-
     void createTable(RelayLogInfo& rli,
                      const std::string& db_name, const std::string& tbl_name,
                      const collate_map_t& collate_map, nanomysql::Connection& conn) const;

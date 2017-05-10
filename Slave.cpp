@@ -573,52 +573,6 @@ connected:
     deregister_slave_on_master(&mysql);
 }
 
-std::map<std::string,std::string> Slave::getRowType(const std::string& db_name,
-                                                    const std::set<std::string>& tbl_names) const
-{
-    nanomysql::Connection conn(m_master_info.conn_options);
-    nanomysql::Connection::result_t res;
-
-    conn.query("SHOW TABLE STATUS FROM " + db_name);
-    conn.store(res);
-
-    std::map<std::string,std::string> ret;
-
-    for (nanomysql::Connection::result_t::const_iterator i = res.begin(); i != res.end(); ++i) {
-
-        if (i->size() <= 3) {
-            LOG_ERROR(log, "WARNING: Broken SHOW TABLE STATUS FROM " << db_name);
-            continue;
-        }
-
-        //row[0] - the table name
-        //row[3] - row_format
-
-        std::map<std::string,nanomysql::field>::const_iterator z = i->find("Name");
-
-        if (z == i->end())
-            throw std::runtime_error("Slave::create_table(): SHOW TABLE STATUS query did not return 'Name'");
-
-        std::string name = z->second.data;
-
-        z = i->find("Row_format");
-
-        if (z == i->end())
-            throw std::runtime_error("Slave::create_table(): SHOW TABLE STATUS query did not return 'Row_format'");
-
-        std::string format = z->second.data;
-
-        if (tbl_names.count(name) != 0) {
-
-            ret[name] = format;
-
-            LOG_DEBUG(log, name << " row_type = " << format);
-        }
-    }
-
-    return ret;
-}
-
 void Slave::register_slave_on_master(MYSQL* mysql)
 {
     uchar buf[1024], *pos= buf;
