@@ -175,10 +175,10 @@ namespace // anonymous
 
             struct Counter
             {
-                uint64_t total   = 0;
-                uint64_t ignored = 0;
-                time_t   done    = 0;
-                time_t   failed  = 0;
+                uint64_t ignored  = 0;
+                uint64_t done     = 0;
+                uint64_t failed   = 0;
+                time_t   row_done = 0;
             };
 
             std::map<std::pair<std::string, std::string>, unsigned long>  map_table;
@@ -212,7 +212,7 @@ namespace // anonymous
 
             virtual void tickOther() { ++events_other; }
 
-            virtual void tickModifyIgnored(const unsigned long id, slave::EventKind kind)
+            virtual void tickModifyEventIgnored(const unsigned long id, slave::EventKind kind)
             {
                 ++events_modify;
 
@@ -224,13 +224,11 @@ namespace // anonymous
                 if (map_detailed.find(key) == map_detailed.end())
                     map_detailed[key] = sCounter;
 
-                map_kind[kind].total      += 1;
                 map_kind[kind].ignored    += 1;
-                map_detailed[key].total   += 1;
                 map_detailed[key].ignored += 1;
             }
 
-            virtual void tickModifyDone(const unsigned long id, slave::EventKind kind, uint64_t time)
+            virtual void tickModifyEventDone(const unsigned long id, slave::EventKind kind)
             {
                 ++events_modify;
 
@@ -242,13 +240,11 @@ namespace // anonymous
                 if (map_detailed.find(key) == map_detailed.end())
                     map_detailed[key] = sCounter;
 
-                map_kind[kind].total    += 1;
-                map_kind[kind].done     += time;
-                map_detailed[key].total += 1;
-                map_detailed[key].done  += time;
+                map_kind[kind].done    += 1;
+                map_detailed[key].done += 1;
             }
 
-            virtual void tickModifyFailed(const unsigned long id, slave::EventKind kind, uint64_t time)
+            virtual void tickModifyEventFailed(const unsigned long id, slave::EventKind kind)
             {
                 ++events_modify;
 
@@ -260,15 +256,17 @@ namespace // anonymous
                 if (map_detailed.find(key) == map_detailed.end())
                     map_detailed[key] = sCounter;
 
-                map_kind[kind].total     += 1;
-                map_kind[kind].failed    += time;
-                map_detailed[key].total  += 1;
-                map_detailed[key].failed += time;
+                map_kind[kind].failed    += 1;
+                map_detailed[key].failed += 1;
             }
 
-            virtual void tickModifyRow()
+            virtual void tickModifyRowDone(const unsigned long id, slave::EventKind kind, uint64_t time)
             {
                 ++rows_modify;
+
+                const auto key = std::make_pair(id, kind);
+                map_kind[kind].row_done    += time;
+                map_detailed[key].row_done += time;
             }
         };
 
@@ -1140,8 +1138,6 @@ namespace // anonymous
                 if (kind == slave::eInsert)
                     ++sFlag;
 
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,      sFlag);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,   sFlag);
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].ignored,    sShouldNotProcess * sFlag);
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].ignored, sShouldNotProcess * sFlag);
 
@@ -1149,11 +1145,15 @@ namespace // anonymous
                 {
                     BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].done,    0);
                     BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].done, 0);
+                    BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].row_done,    0);
+                    BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].row_done, 0);
                 }
                 else
                 {
                     BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].done,    0);
                     BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].done, 0);
+                    BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].row_done,    0);
+                    BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].row_done, 0);
                 }
 
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,  0);
@@ -1198,16 +1198,12 @@ namespace // anonymous
 
             if (kind == slave::eInsert)
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,     1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].failed,    0);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,  1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].failed, 0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,    1);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].failed, 1);
             }
             else
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,     0);
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,    0);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,  0);
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].failed, 0);
             }
         }
@@ -1298,15 +1294,13 @@ namespace // anonymous
 
         for (auto& kind: slave::eventKindList())
         {
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,   2);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].ignored, 0);
-            BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].done,    0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].done,    2);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,  0);
 
             const auto key = std::make_pair(id, kind);
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,   2);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].ignored, 0);
-            BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].done,    0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].done,    2);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].failed,  0);
         }
     }
@@ -1335,13 +1329,13 @@ namespace // anonymous
 
             if (kind == slave::eInsert)
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
             else
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   0);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
 
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].ignored, 0);
@@ -1365,13 +1359,13 @@ namespace // anonymous
 
             if (kind == slave::eInsert)
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
             else
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   0);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
 
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].ignored, 0);
@@ -1379,13 +1373,13 @@ namespace // anonymous
 
             if (kind == slave::eDelete)
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].total,   0);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].done,     0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].row_done, 0);
             }
             else
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].total,   1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyTest].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].done,     1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyTest].row_done, 0);
             }
 
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].ignored, 0);

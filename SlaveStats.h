@@ -221,16 +221,16 @@ public:
     // Unprocessed libslave events.
     virtual void tickOther() {}
     // UPDATE/INSERT/DELETE missed (there are not callbacks on given type of operation).
-    virtual void tickModifyIgnored(const unsigned long /*id*/, EventKind /*kind*/) {}
+    virtual void tickModifyEventIgnored(const unsigned long /*id*/, EventKind /*kind*/) {}
     // UPDATE/INSERT/DELETE filtered (there are callbacks on other types of operations,
-    // but there are not on current type), subset of tickModifyIgnored
-    virtual void tickModifyFiltered(const unsigned long /*id*/, EventKind /*kind*/) {}
+    // but there are not on current type), subset of tickModifyEventIgnored
+    virtual void tickModifyEventFiltered(const unsigned long /*id*/, EventKind /*kind*/) {}
     // UPDATE/INSERT/DELETE successfully processed.
-    virtual void tickModifyDone(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
+    virtual void tickModifyEventDone(const unsigned long /*id*/, EventKind /*kind*/) {}
     // UPDATE/INSERT/DELETE processed with errors (caught exception).
-    virtual void tickModifyFailed(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
+    virtual void tickModifyEventFailed(const unsigned long /*id*/, EventKind /*kind*/) {}
     // UPDATE/INSERT/DELETE rows successfully processed (Modify event may affect several rows of table).
-    virtual void tickModifyRow() {}
+    virtual void tickModifyRowDone(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
     // Errors during processing
     virtual void tickError() {}
 };
