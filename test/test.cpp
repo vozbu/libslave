@@ -48,8 +48,8 @@ std::string print(const std::string& type, const boost::any& v) {
 
 void callback(const slave::RecordSet& event) {
 
-    slave::Slave::binlog_pos_t sBinlogPos = sl->getLastBinlog();
-    std::cout << "master pos " << sBinlogPos.first << " : " << sBinlogPos.second << std::endl;
+    slave::Position sBinlogPos = sl->getLastBinlogPos();
+    std::cout << "master pos " << sBinlogPos << std::endl;
 
     switch (event.type_event) {
     case slave::RecordSet::Update: std::cout << "UPDATE"; break;
@@ -147,8 +147,8 @@ bool isStopping()
 void usage(const char* name)
 {
     std::cout << "Usage: " << name << " -h <mysql host> -u <mysql user> -p <mysql password> -d <mysql database>"
-              << " -b <binlog_name> -o <binlog_pos> -B <to_binlog_name> -O <to_binlog_pos>"
-              << " -C -m"
+              << " -P <mysql port> [-b <binlog_name> -o <binlog_pos> -B <to_binlog_name> -O <to_binlog_pos|-g <gtid_pos>"
+              << " -G <to_gtid_pos>] -C -m"
               << " <table name> <table name> ...\n"
               << " -C means use empty callbacks\n"
               << " -m means benchmark\n"
@@ -168,12 +168,14 @@ int main(int argc, char** argv)
     unsigned long binlog_pos = 0;
     std::string to_binlog_name;
     unsigned long to_binlog_pos = 0;
+    std::string gtid_pos;
+    std::string to_gtid_pos;
 
     bool use_empty_callback = false;
     bool benchmark = false;
 
     int c;
-    while (-1 != (c = ::getopt(argc, argv, "h:u:p:P:d:b:o:B:O:Cm")))
+    while (-1 != (c = ::getopt(argc, argv, "h:u:p:P:d:b:o:B:O:g:G:Cm")))
     {
         switch (c)
         {
@@ -186,6 +188,8 @@ int main(int argc, char** argv)
         case 'o': binlog_pos = std::stoul(optarg); break;
         case 'B': to_binlog_name = optarg; break;
         case 'O': to_binlog_pos = std::stoul(optarg); break;
+        case 'g': gtid_pos = optarg; break;
+        case 'G': to_gtid_pos = optarg; break;
         case 'C': use_empty_callback = true; break;
         case 'm': benchmark = true; break;
         default:
@@ -227,7 +231,11 @@ int main(int argc, char** argv)
         slave::DefaultExtState sDefExtState;
         slave::Slave slave(masterinfo, sDefExtState);
         sl = &slave;
-        sDefExtState.setMasterLogNamePos(binlog_name, binlog_pos);
+        slave::Position pos{binlog_name, binlog_pos};
+        pos.parseGtid(gtid_pos);
+        slave::Position to_pos{to_binlog_name, to_binlog_pos};
+        to_pos.parseGtid(to_gtid_pos);
+        sDefExtState.setMasterPosition(pos);
 
         for (std::vector<std::string>::const_iterator i = tables.begin(); i != tables.end(); ++i) {
             if (use_empty_callback)
@@ -247,6 +255,8 @@ int main(int argc, char** argv)
 
         std::cout << "Initializing client..." << std::endl;
         slave.init();
+        if (!gtid_pos.empty() || !to_gtid_pos.empty())
+            slave.enableGtid();
 
         std::cout << "Reading database structure..." << std::endl;
         slave.createDatabaseStructure();
@@ -254,17 +264,14 @@ int main(int argc, char** argv)
         try {
 
             std::cout << "Reading binlogs..." << std::endl;
-            if (!to_binlog_name.empty() || 0 != to_binlog_pos)
+            if (!to_binlog_name.empty() || 0 != to_binlog_pos || !to_gtid_pos.empty())
             {
                 struct timespec start, finish;
                 clock_gettime(CLOCK_MONOTONIC_RAW, &start);
                 slave.get_remote_binlog([&] ()
                         {
                             const slave::MasterInfo& sMasterInfo = slave.masterInfo();
-                            return (isStopping()
-                                || sMasterInfo.master_log_name > to_binlog_name
-                                || (sMasterInfo.master_log_name == to_binlog_name
-                                    && sMasterInfo.master_log_pos >= to_binlog_pos));
+                            return (isStopping() || sMasterInfo.position.reachedOtherPos(to_pos));
                         });
                 clock_gettime(CLOCK_MONOTONIC_RAW, &finish);
                 finish.tv_sec  -= start.tv_sec;

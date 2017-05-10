@@ -121,7 +121,7 @@ namespace // anonymous
             std::mutex m_Mutex;
             std::condition_variable m_CondVariable;
 
-            TestExtState() : master_log_pos(0), intransaction_pos(0) {}
+            TestExtState() : intransaction_pos(0) {}
 
             virtual slave::State getState() { return slave::State(); }
             virtual void setConnecting() {}
@@ -132,19 +132,28 @@ namespace // anonymous
             virtual time_t getLastUpdateTime() { return 0; }
             virtual time_t getLastEventTime() { return 0; }
             virtual unsigned long getIntransactionPos() { return intransaction_pos; }
-            virtual void setMasterLogNamePos(const std::string& log_name, unsigned long pos)
+            virtual void setMasterPosition(const slave::Position& pos)
             {
                 {
                     std::lock_guard<std::mutex> lock(m_Mutex);
-                    master_log_name = log_name;
-                    master_log_pos = intransaction_pos = pos;
+                    position = pos;
+                    intransaction_pos = pos.log_pos;
                 }
                 m_CondVariable.notify_one();
             }
-            virtual unsigned long getMasterLogPos() { return master_log_pos; }
-            virtual std::string getMasterLogName() { return master_log_name; }
-            virtual void saveMasterInfo() {}
-            virtual bool loadMasterInfo(std::string& logname, unsigned long& pos) { logname.clear(); pos = 0; return false; }
+            virtual void saveMasterPosition() {}
+            virtual bool loadMasterPosition(slave::Position& pos) { pos.clear(); return false; }
+            virtual bool getMasterPosition(slave::Position& pos)
+            {
+                if (!position.empty())
+                {
+                    pos = position;
+                    if (intransaction_pos)
+                        pos.log_pos = intransaction_pos;
+                    return true;
+                }
+                return loadMasterPosition(pos);
+            }
             virtual unsigned int getConnectCount() { return 0; }
             virtual void setStateProcessing(bool _state) {}
             virtual bool getStateProcessing() { return false; }
@@ -152,8 +161,7 @@ namespace // anonymous
             virtual void incTableCount(const std::string& t) {}
 
         private:
-            std::string     master_log_name;
-            unsigned long   master_log_pos;
+            slave::Position position;
             unsigned long   intransaction_pos;
         };
 
@@ -477,20 +485,23 @@ namespace // anonymous
 
         void waitCall()
         {
-            std::string   log_name;
-            unsigned long log_pos = 0;
+            slave::Position pos;
             conn->query("SHOW MASTER STATUS");
-            conn->use([&log_name, &log_pos](const nanomysql::fields_t& row)
+            conn->use([&pos](const nanomysql::fields_t& row)
             {
-                log_name = row.at("File").data;
-                log_pos = std::stoul(row.at("Position").data);
+                pos.log_name = row.at("File").data;
+                pos.log_pos = std::stoul(row.at("Position").data);
+                auto it = row.find("Executed_Gtid_Set");
+                if (it != row.end())
+                    pos.parseGtid(it->second.data);
             });
 
             std::unique_lock<std::mutex> lock(m_ExtState.m_Mutex);
-            if (!m_ExtState.m_CondVariable.wait_for(lock, std::chrono::milliseconds(2000), [this, &log_name, &log_pos]
+            if (!m_ExtState.m_CondVariable.wait_for(lock, std::chrono::milliseconds(2000), [this, &pos]
             {
-                return log_name == m_ExtState.getMasterLogName() && \
-                       log_pos  == m_ExtState.getMasterLogPos();
+                slave::Position posTmp;
+                m_ExtState.getMasterPosition(posTmp);
+                return posTmp.reachedOtherPos(pos);
             }))
                 BOOST_ERROR("Condition variable timed out");
         }
@@ -689,20 +700,16 @@ namespace // anonymous
     struct CheckBinlogPos
     {
         const slave::Slave& m_Slave;
-        slave::Slave::binlog_pos_t m_LastPos;
+        slave::Position     m_LastPos;
 
-        CheckBinlogPos(const slave::Slave& aSlave, const slave::Slave::binlog_pos_t& aLastPos)
+        CheckBinlogPos(const slave::Slave& aSlave, const slave::Position& aLastPos)
         :   m_Slave(aSlave), m_LastPos(aLastPos)
         {}
 
         bool operator() () const
         {
             const slave::MasterInfo& sMasterInfo = m_Slave.masterInfo();
-            if (sMasterInfo.master_log_name > m_LastPos.first
-            || (sMasterInfo.master_log_name == m_LastPos.first
-                && sMasterInfo.master_log_pos >= m_LastPos.second))
-                return true;
-            return false;
+            return sMasterInfo.position.reachedOtherPos(m_LastPos);
         }
     };
 
@@ -731,7 +738,7 @@ namespace // anonymous
         f.checkInsertValue(uint32_t(12321), "12321", "");
 
         // Remember position.
-        const slave::Slave::binlog_pos_t sInitialBinlogPos = f.m_Slave.getLastBinlog();
+        const auto sInitialBinlogPos = f.m_Slave.getLastBinlogPos();
 
         // Insert value, read it.
         f.checkInsertValue(uint32_t(12322), "12322", "");
@@ -742,13 +749,12 @@ namespace // anonymous
         f.conn->query("INSERT INTO test VALUES (345234)");
 
         // And get new position.
-        const slave::Slave::binlog_pos_t sCurBinlogPos = f.m_Slave.getLastBinlog();
-        BOOST_CHECK_NE(sCurBinlogPos.second, sInitialBinlogPos.second);
+        const auto sCurBinlogPos = f.m_Slave.getLastBinlogPos();
+        BOOST_CHECK_NE(sCurBinlogPos.log_pos, sInitialBinlogPos.log_pos);
 
         // Now set old position in slave and check that 2 INSERTs will have been read (12322 and 345234).
         slave::MasterInfo sMasterInfo = f.m_Slave.masterInfo();
-        sMasterInfo.master_log_name = sInitialBinlogPos.first;
-        sMasterInfo.master_log_pos = sInitialBinlogPos.second;
+        sMasterInfo.position = sInitialBinlogPos;
         f.m_Slave.setMasterInfo(sMasterInfo);
 
         CallbackCounter sCallback;
@@ -1097,10 +1103,6 @@ namespace // anonymous
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,              4);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_rotate,             1);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                2);
-            if (f.m_Slave.masterVersion() < 50700)
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
-            else
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              4);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             2);
 
             auto sPair = std::make_pair(f.cfg.mysql_db, "test");
@@ -1259,10 +1261,6 @@ namespace // anonymous
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,              6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_rotate,             1);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                4);
-        if (f.m_Slave.masterVersion() < 50700)
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
-        else
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.rows_modify,               6);
 

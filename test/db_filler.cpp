@@ -34,8 +34,8 @@ void createTable(const nanomysql::mysql_conn_opts& opts, const std::string& aTab
     slave::MasterInfo sMasterInfo(opts, 10);
     slave::Slave sSlave(sMasterInfo);
 
-    slave::Slave::binlog_pos_t sBinlogPos = sSlave.getLastBinlog();
-    std::cout << "Master pos before insert is " << sBinlogPos.first << " : " << sBinlogPos.second << std::endl;
+    slave::Position sBinlogPos = sSlave.getLastBinlogPos();
+    std::cout << "Master pos before insert is " << sBinlogPos << std::endl;
 
     std::string sQuery = aQueryStart;
 
@@ -65,8 +65,8 @@ void createTable(const nanomysql::mysql_conn_opts& opts, const std::string& aTab
     diff = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
     std::cout << "Inserted in " << (diff / 1e9) << " seconds\n";
 
-    sBinlogPos = sSlave.getLastBinlog();
-    std::cout << "Master pos after insert is " << sBinlogPos.first << " : " << sBinlogPos.second << std::endl;
+    sBinlogPos = sSlave.getLastBinlogPos();
+    std::cout << "Master pos after insert is " << sBinlogPos << std::endl;
 
     std::cerr << ::time(NULL) << " Updating data..." << std::endl;
     clock_gettime(CLOCK_MONOTONIC_RAW, &start);
@@ -75,8 +75,8 @@ void createTable(const nanomysql::mysql_conn_opts& opts, const std::string& aTab
     diff = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
     std::cout << "Updated in " << (diff / 1e9) << " seconds\n";
 
-    sBinlogPos = sSlave.getLastBinlog();
-    std::cout << "Master pos after update is " << sBinlogPos.first << " : " << sBinlogPos.second << std::endl;
+    sBinlogPos = sSlave.getLastBinlogPos();
+    std::cout << "Master pos after update is " << sBinlogPos << std::endl;
 }
 
 int main(int argc, char** argv)
