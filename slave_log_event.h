@@ -125,6 +125,11 @@ enum Temporal_type
 #define RW_MAPID_OFFSET    0
 #define ROWS_HEADER_LEN        10
 
+#define ENCODED_FLAG_LENGTH 1
+#define ENCODED_SID_LENGTH  16
+#define ENCODED_GNO_LENGTH  8
+#define GTID_EVENT_LEN      (ENCODED_FLAG_LENGTH + ENCODED_SID_LENGTH + ENCODED_GNO_LENGTH)
+
 #define LOG_EVENT_MINIMAL_HEADER_LEN 19
 
 #define ST_BINLOG_VER_LEN           2
@@ -199,6 +204,14 @@ struct Row_event_info {
     bool has_after_image;
 
     Row_event_info(const char* buf, unsigned int event_len, bool do_update, bool master_ge_56);
+};
+
+struct Gtid_event_info
+{
+    std::string m_sid;
+    int64_t     m_gno;
+
+    Gtid_event_info(const char* buf, unsigned int event_len);
 };
 
 

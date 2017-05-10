@@ -57,29 +57,30 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         return intransaction_pos;
     }
-    virtual void setMasterLogNamePos(const std::string& log_name, unsigned long pos)
+    virtual void setMasterPosition(const Position& pos)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        master_log_name = log_name; master_log_pos = pos;
-        intransaction_pos = pos;
+        position = pos;
+        intransaction_pos = pos.log_pos;
     }
-    virtual unsigned long getMasterLogPos()
+    virtual void saveMasterPosition() {}
+    virtual bool loadMasterPosition(Position& pos)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        return master_log_pos;
-    }
-    virtual std::string getMasterLogName()
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return master_log_name;
-    }
-    virtual void saveMasterInfo() {}
-    virtual bool loadMasterInfo(std::string& logname, unsigned long& pos)
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        logname.clear();
-        pos = 0;
+        pos.clear();
         return false;
+    }
+    virtual bool getMasterPosition(Position& pos)
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!position.empty())
+        {
+            pos = position;
+            if (intransaction_pos)
+                pos.log_pos = intransaction_pos;
+            return true;
+        }
+        return loadMasterPosition(pos);
     }
     virtual unsigned int getConnectCount()
     {

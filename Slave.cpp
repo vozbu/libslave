@@ -107,12 +107,19 @@ void Slave::init()
     check_master_version();
 
     check_master_binlog_format();
+    check_master_gtid_mode();
 
-    ext_state.loadMasterInfo( m_master_info.master_log_name, m_master_info.master_log_pos);
+    ext_state.loadMasterPosition(m_master_info.position);
 
     LOG_TRACE(log, "Libslave initialized OK");
 }
 
+void Slave::enableGtid(bool on)
+{
+    if (on && !m_master_info.gtid_mode)
+        throw std::runtime_error("Trying to enable gtid on libslave while gtid_mode is disabled on master");
+    m_gtid_enabled = on;
+}
 
 void Slave::close_connection()
 {
@@ -407,25 +414,20 @@ connected:
 
     // Get binlog position saved in ext_state before, or load it
     // from persistent storage. Get false if failed to get binlog position.
-    if( !ext_state.getMasterInfo(
-                m_master_info.master_log_name,
-                m_master_info.master_log_pos) ) {
+    if(!ext_state.getMasterPosition(m_master_info.position))
+    {
         // If there is not binlog position saved before,
         // get last binlog name and last binlog position.
-        std::pair<std::string,unsigned int> row = getLastBinlog();
-
-        m_master_info.master_log_name = row.first;
-        m_master_info.master_log_pos = row.second;
-
-        ext_state.setMasterLogNamePos(m_master_info.master_log_name, m_master_info.master_log_pos);
-        ext_state.saveMasterInfo();
+        LOG_INFO(log, "There is no saved binlog_pos");
+        m_master_info.position = getLastBinlogPos();
+        ext_state.setMasterPosition(m_master_info.position);
+        ext_state.saveMasterPosition();
     }
 
-    LOG_INFO(log, "Starting from binlog_name:binlog_pos : " << m_master_info.master_log_name
-             << ":" << m_master_info.master_log_pos );
+    LOG_INFO(log, "Starting from binlog_pos: " << m_master_info.position);
 
-
-    request_dump(m_master_info.master_log_name, m_master_info.master_log_pos, &mysql);
+    request_dump(m_master_info.position, &mysql);
+    gtid_t gtid_next;
 
     while (!_interruptFlag()) {
 
@@ -499,7 +501,7 @@ connected:
             LOG_TRACE(log, "Event log position: " << event.log_pos );
 
             if (event.log_pos != 0) {
-                m_master_info.master_log_pos = event.log_pos;
+                m_master_info.position.log_pos = event.log_pos;
                 ext_state.setLastEventTimePos(event.when, event.log_pos);
             }
 
@@ -511,11 +513,11 @@ connected:
 
             if (event.type == XID_EVENT) {
 
-                ext_state.setMasterLogNamePos(m_master_info.master_log_name, m_master_info.master_log_pos);
+                if (!gtid_next.first.empty())
+                    m_master_info.position.addGtid(gtid_next);
+                ext_state.setMasterPosition(m_master_info.position);
 
-                LOG_TRACE(log, "Got XID event. Using binlog name:pos: "
-                          << m_master_info.master_log_name << ":" << m_master_info.master_log_pos);
-
+                LOG_TRACE(log, "Got XID event. Using binlog pos: " << m_master_info.position);
 
                 if (m_xid_callback)
                     m_xid_callback(event.server_id);
@@ -539,18 +541,30 @@ connected:
                     //LOG_TRACE(log, "ROTATE_FAKE");
                 }
 
-                m_master_info.master_log_name = rei.new_log_ident;
-                m_master_info.master_log_pos = rei.pos; // this will always be equal to 4
+                m_master_info.position.log_name = rei.new_log_ident;
+                m_master_info.position.log_pos = rei.pos; // this will always be equal to 4
 
-                ext_state.setMasterLogNamePos(m_master_info.master_log_name, m_master_info.master_log_pos);
+                ext_state.setMasterPosition(m_master_info.position);
 
-                LOG_TRACE(log, "new position is " << m_master_info.master_log_name << ":" << m_master_info.master_log_pos);
+                LOG_TRACE(log, "new position is " << m_master_info.position);
                 LOG_TRACE(log, "ROTATE_EVENT processed OK.");
             }
+            else if (event.type == GTID_LOG_EVENT)
+            {
+                LOG_TRACE(log, "Got GTID event.");
+                if (!gtid_next.first.empty())
+                {
+                    m_master_info.position.addGtid(gtid_next);
+                    ext_state.setMasterPosition(m_master_info.position);
+                }
+                Gtid_event_info gei(event.buf, event.event_len);
+                LOG_TRACE(log, "GTID_NEXT: sid = " << gei.m_sid << ", gno =  " << gei.m_gno);
+                gtid_next.first = gei.m_sid;
+                gtid_next.second = gei.m_gno;
+            }
 
-
-            if (process_event(event, m_rli, m_master_info.master_log_pos)) {
-
+            if (process_event(event, m_rli))
+            {
                 LOG_TRACE(log, "Error in processing event.");
             }
 
@@ -678,6 +692,25 @@ void Slave::check_master_binlog_format()
     throw std::runtime_error("Slave::check_binlog_format(): Could not SHOW GLOBAL VARIABLES LIKE 'binlog_format'");
 }
 
+void Slave::check_master_gtid_mode()
+{
+    nanomysql::Connection conn(m_master_info.conn_options);
+    nanomysql::Connection::result_t res;
+
+    conn.query("SHOW GLOBAL VARIABLES LIKE 'gtid_mode'");
+    conn.store(res);
+
+    m_master_info.gtid_mode = false;
+    if (res.size() == 1 && res[0].size() == 2)
+    {
+        auto it = res[0].find("Value");
+        if (it == res[0].end())
+            throw std::runtime_error("Slave::check_master_gtid_mode(): SHOW GLOBAL VARIABLES query did not return 'Value'");
+
+        m_master_info.gtid_mode = (it->second.data == "ON");
+    }
+}
+
 void Slave::do_checksum_handshake(MYSQL* mysql)
 {
     const char query[] = "SET @master_binlog_checksum= @@global.binlog_checksum";
@@ -737,7 +770,7 @@ std::string checkAlterOrCreateQuery(const std::string& str)
 
 
 
-int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli, unsigned long long pos)
+int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo& m_rli)
 {
 
 
@@ -842,7 +875,7 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo &m_rli
     return 0;
 }
 
-void Slave::request_dump(const std::string& logname, unsigned long start_position, MYSQL* mysql)
+void Slave::request_dump_wo_gtid(const std::string& logname, unsigned long start_position, MYSQL* mysql)
 {
     uchar buf[128];
 
@@ -867,6 +900,40 @@ void Slave::request_dump(const std::string& logname, unsigned long start_positio
 
         LOG_ERROR(log, "Error sending COM_BINLOG_DUMP");
         throw std::runtime_error("Error in sending COM_BINLOG_DUMP");
+    }
+}
+
+void Slave::request_dump(const Position& pos, MYSQL* mysql)
+{
+    if (!m_gtid_enabled)
+    {
+        request_dump_wo_gtid(pos.log_name, pos.log_pos, mysql);
+    }
+    else
+    {
+#if MYSQL_VERSION_ID >= 50605
+        size_t encoded_size = m_master_info.position.encodedGtidSize();
+        uchar* buf = (uchar*)malloc(encoded_size + 22);
+
+        int2store(buf, 4);
+        int4store(buf + 2, m_server_id);
+        int4store(buf + 6, 0);
+        int8store(buf + 10, 4LL);
+
+        int4store(buf + 18, encoded_size);
+        m_master_info.position.encodeGtid(buf + 22);
+
+        if (simple_command(mysql, COM_BINLOG_DUMP_GTID, buf, encoded_size + 22, 1))
+        {
+            LOG_ERROR(log, "Error sending COM_BINLOG_DUMP_GTID");
+            free(buf);
+            throw std::runtime_error("Error in sending COM_BINLOG_DUMP_GTID");
+        }
+        free(buf);
+#else
+        LOG_ERROR(log, "libmysqlclient >= 5.6.5 needed to use GTID replication");
+        throw std::runtime_error("libmysqlclient >= 5.6.5 needed to use GTID replication");
+#endif
     }
 }
 
@@ -939,7 +1006,7 @@ void Slave::generateSlaveId()
     LOG_DEBUG(log, "Generated m_server_id = " << m_server_id);
 }
 
-Slave::binlog_pos_t Slave::getLastBinlog() const
+Position Slave::getLastBinlogPos() const
 {
     nanomysql::Connection conn(m_master_info.conn_options);
     nanomysql::Connection::result_t res;
@@ -949,22 +1016,27 @@ Slave::binlog_pos_t Slave::getLastBinlog() const
     conn.store(res);
 
     if (res.size() == 1) {
+        Position result;
 
         std::map<std::string,nanomysql::field>::const_iterator z = res[0].find("File");
 
         if (z == res[0].end())
             throw std::runtime_error("Slave::create_table(): " + query + " query did not return 'File'");
 
-        std::string file = z->second.data;
+        result.log_name = z->second.data;
 
         z = res[0].find("Position");
 
         if (z == res[0].end())
             throw std::runtime_error("Slave::create_table(): " + query + " query did not return 'Position'");
 
-        std::string pos = z->second.data;
+        result.log_pos = std::strtoul(z->second.data.c_str(), nullptr, 10);
 
-        return std::make_pair(file, ::strtoul(pos.c_str(), NULL, 10));
+        z = res[0].find("Executed_Gtid_Set");
+        if (z != res[0].end())
+            result.parseGtid(z->second.data);
+
+        return result;
     }
 
     throw std::runtime_error("Slave::getLastBinLog(): Could not " + query);
