@@ -1555,6 +1555,88 @@ namespace // anonymous
         f.conn->query("ALTER TABLE `stat` \n    DROP COLUMN `value`,\n    ADD COLUMN value int");
         f.checkInsertValue(uint32_t(12), "12", "", "stat");
     }
+
+    void test_GtidParsing()
+    {
+        slave::Position pos;
+        const std::string uuidText = "24f7c945-c871-11e6-9461-0242ac110006";
+        const std::string uuid = "24f7c945c87111e694610242ac110006";
+
+        pos.parseGtid(uuidText + ":1");
+        BOOST_CHECK(pos.gtid_executed.find(uuid) != pos.gtid_executed.end());
+        const auto& ref1 = pos.gtid_executed[uuid];
+        BOOST_CHECK_EQUAL(ref1.size(), 1);
+        BOOST_CHECK(ref1.front() == slave::gtid_interval_t(1, 1));
+
+        pos.clear();
+        pos.parseGtid(uuidText + ":1-697");
+        BOOST_CHECK(pos.gtid_executed.find(uuid) != pos.gtid_executed.end());
+        const auto& ref2 = pos.gtid_executed[uuid];
+        BOOST_CHECK_EQUAL(ref2.size(), 1);
+        BOOST_CHECK(ref2.front() == slave::gtid_interval_t(1, 697));
+
+        pos.clear();
+        pos.parseGtid(uuidText + ":1-697:704:706-710");
+        BOOST_CHECK(pos.gtid_executed.find(uuid) != pos.gtid_executed.end());
+        const auto& ref3 = pos.gtid_executed[uuid];
+        BOOST_CHECK_EQUAL(ref3.size(), 3);
+        BOOST_CHECK(ref3.front() == slave::gtid_interval_t(1, 697));
+        BOOST_CHECK(*std::next(ref3.begin()) == slave::gtid_interval_t(704, 704));
+        BOOST_CHECK(ref3.back() == slave::gtid_interval_t(706, 710));
+
+        pos.clear();
+        const std::string uuidText2 = "ae00751a-cb5f-11e6-9d92-e03f490fd3db";
+        const std::string uuid2 = "ae00751acb5f11e69d92e03f490fd3db";
+        const std::string uuidText3 = "ae00751a-cb5f-11e6-9d92-e03f490fd3de";
+        const std::string uuid3 = "ae00751acb5f11e69d92e03f490fd3de";
+        pos.parseGtid(uuidText + ":1-697, \n" + uuidText2 + ":1-14, " + uuidText3 + ":34\n");
+        BOOST_CHECK(pos.gtid_executed.find(uuid) != pos.gtid_executed.end());
+        BOOST_CHECK(pos.gtid_executed.find(uuid2) != pos.gtid_executed.end());
+        BOOST_CHECK(pos.gtid_executed.find(uuid3) != pos.gtid_executed.end());
+        const auto& ref4 = pos.gtid_executed[uuid];
+        const auto& ref5 = pos.gtid_executed[uuid2];
+        const auto& ref6 = pos.gtid_executed[uuid3];
+        BOOST_CHECK_EQUAL(ref4.size(), 1);
+        BOOST_CHECK_EQUAL(ref5.size(), 1);
+        BOOST_CHECK_EQUAL(ref6.size(), 1);
+        BOOST_CHECK(ref4.front() == slave::gtid_interval_t(1, 697));
+        BOOST_CHECK(ref5.front() == slave::gtid_interval_t(1, 14));
+        BOOST_CHECK(ref6.front() == slave::gtid_interval_t(34, 34));
+    }
+
+    void test_GtidAdding()
+    {
+        slave::Position pos;
+        const std::string uuidText = "24f7c945-c871-11e6-9461-0242ac110006";
+        const std::string uuid = "24f7c945c87111e694610242ac110006";
+        pos.parseGtid(uuidText + ":2-4");
+        const auto& ref = pos.gtid_executed[uuid];
+
+        pos.addGtid(slave::gtid_t(uuid, 6));
+        BOOST_CHECK_EQUAL(ref.size(), 2);
+        BOOST_CHECK(ref.front() == slave::gtid_interval_t(2, 4));
+        BOOST_CHECK(ref.back() == slave::gtid_interval_t(6, 6));
+
+        pos.addGtid(slave::gtid_t(uuid, 5));
+        BOOST_CHECK_EQUAL(ref.size(), 1);
+        BOOST_CHECK(ref.front() == slave::gtid_interval_t(2, 6));
+
+        pos.addGtid(slave::gtid_t(uuid, 1));
+        BOOST_CHECK_EQUAL(ref.size(), 1);
+        BOOST_CHECK(ref.front() == slave::gtid_interval_t(1, 6));
+
+        pos.addGtid(slave::gtid_t(uuid, 7));
+        BOOST_CHECK_EQUAL(ref.size(), 1);
+        BOOST_CHECK(ref.front() == slave::gtid_interval_t(1, 7));
+
+        const std::string uuid2 = "ae00751acb5f11e69d92e03f490fd3db";
+        pos.addGtid(slave::gtid_t(uuid2, 2));
+        BOOST_CHECK_EQUAL(ref.size(), 1);
+        BOOST_CHECK(ref.front() == slave::gtid_interval_t(1, 7));
+        const auto& ref2 = pos.gtid_executed[uuid2];
+        BOOST_CHECK_EQUAL(ref2.size(), 1);
+        BOOST_CHECK(ref2.front() == slave::gtid_interval_t(2, 2));
+    }
 }// anonymous-namespace
 
 test_suite* init_unit_test_suite(int argc, char* argv[])
@@ -1569,6 +1651,8 @@ test_suite* init_unit_test_suite(int argc, char* argv[])
     ADD_FIXTURE_TEST(test_Stat);
     ADD_FIXTURE_TEST(test_BinlogRowImageOption);
     ADD_FIXTURE_TEST(test_AlterCreateTable);
+    ADD_FIXTURE_TEST(test_GtidParsing);
+    ADD_FIXTURE_TEST(test_GtidAdding);
 
 #undef ADD_FIXTURE_TEST
 
