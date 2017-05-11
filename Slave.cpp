@@ -30,6 +30,7 @@
 #include <mysql/m_ctype.h>
 #include <mysql/sql_common.h>
 
+#include <signal.h>
 #include <unistd.h>
 
 #define packet_end_data 1
@@ -93,6 +94,14 @@ TYPELIB binlog_checksum_typelib =
     binlog_checksum_type_length
 };
 
+void sigUnblock(int signal)
+{
+    sigset_t sigSet;
+    ::sigemptyset(&sigSet);
+    ::sigaddset(&sigSet, signal);
+    if (0 != ::pthread_sigmask(SIG_UNBLOCK, &sigSet, nullptr))
+        LOG_ERROR(log, "Can't unblock signal: " << errno);
+}
 }// anonymous-namespace
 
 
@@ -123,8 +132,16 @@ void Slave::enableGtid(bool on)
 
 void Slave::close_connection()
 {
-    ::shutdown(mysql.net.fd, SHUT_RDWR);
-    ::close(mysql.net.fd);
+    std::lock_guard<std::mutex> l(m_slave_thread_mutex);
+    if (m_slave_thread_id)
+    {
+        if (::shutdown(mysql.net.fd, SHUT_RDWR) != 0)
+            LOG_ERROR(log, "Slave::close_connection: shutdown: failed shutdown socket: " << errno);
+
+        // it is important to send signal after shutdown socket
+        // this interrupts all active system calls and unblocks thread
+        ::pthread_kill(m_slave_thread_id, SIGURG);
+    }
 }
 
 
@@ -330,16 +347,21 @@ struct raii_mysql_connector
     MYSQL* mysql;
     MasterInfo& m_master_info;
     ExtStateIface &ext_state;
+    pthread_t& thread_id;
+    std::mutex& mutex;
 
-    raii_mysql_connector(MYSQL* m, MasterInfo& mmi, ExtStateIface &state) : mysql(m), m_master_info(mmi), ext_state(state) {
-
+    raii_mysql_connector(MYSQL* m, MasterInfo& mmi, ExtStateIface& state, pthread_t& tid, std::mutex& mtx)
+        : mysql(m)
+        , m_master_info(mmi)
+        , ext_state(state)
+        , thread_id(tid)
+        , mutex(mtx)
+    {
         connect(false);
     }
 
     ~raii_mysql_connector() {
-
-        end_server(mysql);
-        mysql_close(mysql);
+        disconnect();
     }
 
     void connect(bool reconnect) {
@@ -349,9 +371,11 @@ struct raii_mysql_connector
         ext_state.setConnecting();
 
         if (reconnect) {
-            end_server(mysql);
-            mysql_close(mysql);
+            disconnect();
         }
+
+        std::lock_guard<std::mutex> l(mutex);
+        thread_id = ::pthread_self();
 
         if (!(mysql_init(mysql))) {
 
@@ -390,12 +414,23 @@ struct raii_mysql_connector
 
         LOG_TRACE(log, "exit: connect_to_master");
     }
+
+    void disconnect()
+    {
+        std::lock_guard<std::mutex> l(mutex);
+        thread_id = 0;
+        end_server(mysql);
+        mysql_close(mysql);
+    }
 };
 }// anonymous-namespace
 
 
 void Slave::get_remote_binlog(const std::function<bool()>& _interruptFlag)
 {
+    // SIGURG is used to unblock read operation on shutdown
+    // the default handler for this signal is ignore
+    sigUnblock(SIGURG);
     int count_packet = 0;
 
     generateSlaveId();
@@ -403,7 +438,7 @@ void Slave::get_remote_binlog(const std::function<bool()>& _interruptFlag)
     // Moved to Slave member
     // MYSQL mysql;
 
-    raii_mysql_connector __conn(&mysql, m_master_info, ext_state);
+    raii_mysql_connector __conn(&mysql, m_master_info, ext_state, m_slave_thread_id, m_slave_thread_mutex);
 
     //connect_to_master(false, &mysql);
 

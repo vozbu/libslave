@@ -28,6 +28,9 @@
 #include <map>
 #include <set>
 #include <memory>
+#include <mutex>
+
+#include <pthread.h>
 
 #include <mysql/mysql.h>
 
@@ -72,6 +75,8 @@ private:
 
     RelayLogInfo m_rli;
 
+    pthread_t m_slave_thread_id = 0;
+    std::mutex m_slave_thread_mutex;
 
     void createDatabaseStructure_(table_order_t& tabs, RelayLogInfo& rli) const;
 
