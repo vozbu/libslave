@@ -23,6 +23,13 @@ struct Position
     unsigned long log_pos = 0;
     gtid_set_t    gtid_executed;
 
+    Position() {}
+
+    Position(std::string _log_name, unsigned long _log_pos)
+    :   log_name(std::move(_log_name))
+    ,   log_pos(_log_pos)
+    {}
+
     bool empty() const { return (log_name.empty() || log_pos == 0) && gtid_executed.empty(); }
     void clear() { log_name.clear(); log_pos = 0; gtid_executed.clear(); }
 
