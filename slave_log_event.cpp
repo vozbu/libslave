@@ -33,7 +33,29 @@
 #include "Logging.h"
 
 
+namespace
+{
+void bin2hex_nz(char* dst, const uint8_t* src, size_t sz_src)
+{
+    if (!src || !dst) return;
 
+    static const char* hex = "0123456789abcdef";
+
+    for (size_t i = 0; i < sz_src; ++i)
+    {
+        *dst++ = hex[src[i] >> 4];
+        *dst++ = hex[src[i] & 0x0f];
+    }
+}
+
+std::string bin2hex(const uint8_t* src, size_t sz_src)
+{
+    std::string res;
+    res.resize(sz_src * 2);
+    bin2hex_nz(const_cast<char*>(res.data()), src, sz_src);
+    return res;
+}
+} // namespace anonymous
 
 namespace slave {
 
@@ -142,6 +164,17 @@ Row_event_info::Row_event_info(const char* buf, unsigned int event_len, bool do_
 
     m_rows_buf = start;
     m_rows_end = start + (event_len - ((char*)start - buf));
+}
+
+Gtid_event_info::Gtid_event_info(const char* buf, unsigned int event_len)
+{
+    if (event_len < LOG_EVENT_HEADER_LEN + GTID_EVENT_LEN) {
+        LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_EVENT_HEADER_LEN + GTID_EVENT_LEN);
+        throw std::runtime_error("Gtid_event_info::Gtid_event_info failed");
+    }
+
+    m_sid = bin2hex((uchar*)buf + LOG_EVENT_HEADER_LEN + ENCODED_FLAG_LENGTH, ENCODED_SID_LENGTH);
+    m_gno = sint8korr(buf + LOG_EVENT_HEADER_LEN + ENCODED_FLAG_LENGTH + ENCODED_SID_LENGTH);
 }
 
 /////////////////////////
@@ -262,7 +295,8 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
     }
 
     if (event_stat)
-        if (bei.type != FORMAT_DESCRIPTION_EVENT && bei.type != ROTATE_EVENT)
+        if (bei.type != FORMAT_DESCRIPTION_EVENT && bei.type != ROTATE_EVENT &&
+            bei.type != HEARTBEAT_LOG_EVENT && bei.type != PREVIOUS_GTIDS_LOG_EVENT)
             event_stat->tick(bei.when);
 
     switch (bei.type) {
@@ -302,7 +336,8 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
         // event_stat->processTableMapEvent is called from other place.
         return true;
         break;
-
+    case GTID_LOG_EVENT:
+        return true;
     case LOAD_EVENT:
     case NEW_LOAD_EVENT:
     case SLAVE_EVENT: /* can never happen (unused event) */
@@ -324,7 +359,6 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
     case HEARTBEAT_LOG_EVENT:
     case IGNORABLE_LOG_EVENT:
     case ROWS_QUERY_LOG_EVENT:
-    case GTID_LOG_EVENT:
     case ANONYMOUS_GTID_LOG_EVENT:
     case PREVIOUS_GTIDS_LOG_EVENT:
     case TRANSACTION_CONTEXT_EVENT:
@@ -543,9 +577,9 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
         unsigned char* row_start = roi.m_rows_buf;
 
         if (should_process(table->m_filter, kind)) {
-            time_stamp start = now();
             while (row_start < roi.m_rows_end &&
                    row_start != NULL) {
+                time_stamp start = now();
                 try
                 {
                     if (kind == eUpdate) {
@@ -559,22 +593,22 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
                 catch (...)
                 {
                     if (event_stat)
-                        event_stat->tickModifyFailed(roi.m_table_id, kind, now() - start);
+                        event_stat->tickModifyEventFailed(roi.m_table_id, kind);
                     throw;
                 }
                 if (event_stat)
-                    event_stat->tickModifyRow();
+                    event_stat->tickModifyRowDone(roi.m_table_id, kind, now() - start);
             }
 
             if (event_stat)
-                event_stat->tickModifyDone(roi.m_table_id, kind, now() - start);
+                event_stat->tickModifyEventDone(roi.m_table_id, kind);
             return;
         }
         else if (event_stat)
-            event_stat->tickModifyFiltered(roi.m_table_id, kind);
+            event_stat->tickModifyEventFiltered(roi.m_table_id, kind);
     }
     if (event_stat)
-        event_stat->tickModifyIgnored(roi.m_table_id, kind);
+        event_stat->tickModifyEventIgnored(roi.m_table_id, kind);
 }
 
 

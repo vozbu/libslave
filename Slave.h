@@ -28,9 +28,13 @@
 #include <map>
 #include <set>
 #include <memory>
+#include <mutex>
+
+#include <pthread.h>
 
 #include <mysql/mysql.h>
 
+#include "binlog_pos.h"
 #include "slave_log_event.h"
 #include "SlaveStats.h"
 
@@ -55,6 +59,7 @@ private:
 
     int m_server_id;
     int m_master_version = 0;
+    bool m_gtid_enabled = false;
 
     MasterInfo m_master_info;
     EmptyExtState empty_ext_state;
@@ -70,6 +75,8 @@ private:
 
     RelayLogInfo m_rli;
 
+    pthread_t m_slave_thread_id = 0;
+    std::mutex m_slave_thread_mutex;
 
     void createDatabaseStructure_(table_order_t& tabs, RelayLogInfo& rli) const;
 
@@ -89,13 +96,12 @@ public:
     void setMasterInfo(const MasterInfo& aMasterInfo)
     {
         m_master_info = aMasterInfo;
-        ext_state.setMasterLogNamePos(aMasterInfo.master_log_name, aMasterInfo.master_log_pos);
+        ext_state.setMasterPosition(aMasterInfo.position);
     }
     const MasterInfo& masterInfo() const { return m_master_info; }
 
-    typedef std::pair<std::string, unsigned int> binlog_pos_t;
     // Reads current binlog position from database
-    binlog_pos_t getLastBinlog() const;
+    Position getLastBinlogPos() const;
 
     void setCallback(const std::string& _db_name, const std::string& _tbl_name, callback _callback,
                      EventKind filter = eAll)
@@ -141,6 +147,8 @@ public:
     int masterVersion() const { return m_master_version; }
     bool masterGe56() const { return m_master_version >= 50600; }
 
+    void enableGtid(bool on = true);
+
     // Closes connection, opened in get_remotee_binlog. Should be called if your have get_remote_binlog
     // blocked on reading data from mysql server in the separate thread and you want to stop this thread.
     // You should take care that interruptFlag will return 'true' after connection is closed.
@@ -152,15 +160,14 @@ protected:
     void check_master_version();
 
     void check_master_binlog_format();
+    void check_master_gtid_mode();
 
-    int process_event(const slave::Basic_event_info& bei, RelayLogInfo &rli, unsigned long long pos);
+    int process_event(const slave::Basic_event_info& bei, RelayLogInfo& rli);
 
-    void request_dump(const std::string& logname, unsigned long start_position, MYSQL* mysql);
+    void request_dump_wo_gtid(const std::string& logname, unsigned long start_position, MYSQL* mysql);
+    void request_dump(const Position& pos, MYSQL* mysql);
 
     ulong read_event(MYSQL* mysql);
-
-    std::map<std::string,std::string> getRowType(const std::string& db_name,
-                                                 const std::set<std::string>& tbl_names) const;
 
     void createTable(RelayLogInfo& rli,
                      const std::string& db_name, const std::string& tbl_name,

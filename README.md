@@ -20,6 +20,7 @@ Features
 * Support for mysql options:
   * binlog_checksum=(NONE,CRC32)
   * binlog_row_image=(full,minimal)
+  * GTID or log name and position positioning
 
 USAGE
 ===================================================================

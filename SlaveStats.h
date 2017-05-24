@@ -31,6 +31,7 @@
 #include <string>
 #include <sys/time.h>
 
+#include "binlog_pos.h"
 #include "nanomysql.h"
 
 
@@ -48,11 +49,11 @@ enum enum_binlog_checksum_alg
 struct MasterInfo {
 
     nanomysql::mysql_conn_opts conn_options;
-    std::string master_log_name;
-    unsigned long master_log_pos = 0;
+    Position position;
     unsigned int connect_retry;
     enum_binlog_checksum_alg checksum_alg = BINLOG_CHECKSUM_ALG_OFF;
     bool is_old_storage = true;
+    bool gtid_mode = false;
 
     MasterInfo() : connect_retry(10) {}
 
@@ -69,8 +70,7 @@ struct State {
     time_t          last_filtered_update;
     time_t          last_event_time;
     time_t          last_update;
-    std::string     master_log_name;
-    unsigned long   master_log_pos;
+    Position        position;
     unsigned long   intransaction_pos;
     unsigned int    connect_count;
     bool            state_processing;
@@ -80,7 +80,6 @@ struct State {
         last_filtered_update(0),
         last_event_time(0),
         last_update(0),
-        master_log_pos(0),
         intransaction_pos(0),
         connect_count(0),
         state_processing(false)
@@ -97,36 +96,22 @@ struct ExtStateIface {
     virtual time_t getLastUpdateTime() = 0;
     virtual time_t getLastEventTime() = 0;
     virtual unsigned long getIntransactionPos() = 0;
-    virtual void setMasterLogNamePos(const std::string& log_name, unsigned long pos) = 0;
-    virtual unsigned long getMasterLogPos() = 0;
-    virtual std::string getMasterLogName() = 0;
+    virtual void setMasterPosition(const Position& pos) = 0;
 
-    // Saves master info into persistent storage, i.e. file or database.
-    // In case of error will try to save master info until success.
-    virtual void saveMasterInfo() = 0;
+    // Saves master position into persistent storage, i.e. file or database.
+    // In case of error will try to save master position until success.
+    virtual void saveMasterPosition() = 0;
 
-    // Reads master info from persistent storage.
-    // If master info was not saved earlier (for i.e. it is the first daemon start),
+    // Reads master position from persistent storage.
+    // If master position was not saved earlier (for i.e. it is the first daemon start),
     // position is cleared (pos = 0, name = ""). In such case library reads binlogs
     // from the current position.
     // Returns true if saved position was read, false otherwise.
     // In case of read error function will retry to read until success which means
     // known position or known absence of saved position.
-    virtual bool loadMasterInfo(std::string& logname, unsigned long& pos) = 0;
-
-    // Works like loadMasterInfo() but writes last position inside transaction if presented.
-    bool getMasterInfo(std::string& logname, unsigned long& pos)
-    {
-        unsigned long in_trans_pos = getIntransactionPos();
-        std::string master_logname = getMasterLogName();
-
-        if(in_trans_pos!=0 && !master_logname.empty()) {
-            logname = master_logname;
-            pos = in_trans_pos;
-            return true;
-        } else
-            return loadMasterInfo(logname, pos);
-    }
+    virtual bool loadMasterPosition(Position& pos) = 0;
+    // Works like loadMasterPosition() but writes last position inside transaction if presented.
+    virtual bool getMasterPosition(Position& pos) = 0;
     virtual unsigned int getConnectCount() = 0;
     virtual void setStateProcessing(bool _state) = 0;
     virtual bool getStateProcessing() = 0;
@@ -141,7 +126,7 @@ struct ExtStateIface {
 
 // Stub object for answers on stats requests through StateHolder while libslave is not initialized yet.
 struct EmptyExtState: public ExtStateIface {
-    EmptyExtState() : master_log_pos(0), intransaction_pos(0) {}
+    EmptyExtState() : intransaction_pos(0) {}
 
     virtual State getState() { return State(); }
     virtual void setConnecting() {}
@@ -152,11 +137,20 @@ struct EmptyExtState: public ExtStateIface {
     virtual time_t getLastUpdateTime() { return 0; }
     virtual time_t getLastEventTime() { return 0; }
     virtual unsigned long getIntransactionPos() { return intransaction_pos; }
-    virtual void setMasterLogNamePos(const std::string& log_name, unsigned long pos) { master_log_name = log_name; master_log_pos = intransaction_pos = pos;}
-    virtual unsigned long getMasterLogPos() { return master_log_pos; }
-    virtual std::string getMasterLogName() { return master_log_name; }
-    virtual void saveMasterInfo() {}
-    virtual bool loadMasterInfo(std::string& logname, unsigned long& pos) { logname.clear(); pos = 0; return false; }
+    virtual void setMasterPosition(const Position& pos) { position = pos; intransaction_pos = pos.log_pos; }
+    virtual void saveMasterPosition() {}
+    virtual bool loadMasterPosition(Position& pos) { pos.clear(); return false; }
+    virtual bool getMasterPosition(Position& pos)
+    {
+        if (!position.empty())
+        {
+            pos = position;
+            if (intransaction_pos)
+                pos.log_pos = intransaction_pos;
+            return true;
+        }
+        return loadMasterPosition(pos);
+    }
     virtual unsigned int getConnectCount() { return 0; }
     virtual void setStateProcessing(bool _state) {}
     virtual bool getStateProcessing() { return false; }
@@ -164,23 +158,8 @@ struct EmptyExtState: public ExtStateIface {
     virtual void incTableCount(const std::string& t) {}
 
 private:
-    std::string     master_log_name;
-    unsigned long   master_log_pos;
+    Position        position;
     unsigned long   intransaction_pos;
-};
-
-// Saves ExtStateIface or it's descendants.
-// Used in singleton.
-struct StateHolder {
-    typedef std::shared_ptr<ExtStateIface> PExtState;
-    PExtState ext_state;
-    StateHolder() :
-        ext_state(new EmptyExtState)
-    {}
-    ExtStateIface& operator()()
-    {
-        return *ext_state;
-    }
 };
 
 enum EventKind
@@ -221,16 +200,16 @@ public:
     // Unprocessed libslave events.
     virtual void tickOther() {}
     // UPDATE/INSERT/DELETE missed (there are not callbacks on given type of operation).
-    virtual void tickModifyIgnored(const unsigned long /*id*/, EventKind /*kind*/) {}
+    virtual void tickModifyEventIgnored(const unsigned long /*id*/, EventKind /*kind*/) {}
     // UPDATE/INSERT/DELETE filtered (there are callbacks on other types of operations,
-    // but there are not on current type), subset of tickModifyIgnored
-    virtual void tickModifyFiltered(const unsigned long /*id*/, EventKind /*kind*/) {}
+    // but there are not on current type), subset of tickModifyEventIgnored
+    virtual void tickModifyEventFiltered(const unsigned long /*id*/, EventKind /*kind*/) {}
     // UPDATE/INSERT/DELETE successfully processed.
-    virtual void tickModifyDone(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
+    virtual void tickModifyEventDone(const unsigned long /*id*/, EventKind /*kind*/) {}
     // UPDATE/INSERT/DELETE processed with errors (caught exception).
-    virtual void tickModifyFailed(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
+    virtual void tickModifyEventFailed(const unsigned long /*id*/, EventKind /*kind*/) {}
     // UPDATE/INSERT/DELETE rows successfully processed (Modify event may affect several rows of table).
-    virtual void tickModifyRow() {}
+    virtual void tickModifyRowDone(const unsigned long /*id*/, EventKind /*kind*/, uint64_t /*callbackWorkTimeNanoSeconds*/) {}
     // Errors during processing
     virtual void tickError() {}
 };

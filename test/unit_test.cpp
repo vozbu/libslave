@@ -121,7 +121,7 @@ namespace // anonymous
             std::mutex m_Mutex;
             std::condition_variable m_CondVariable;
 
-            TestExtState() : master_log_pos(0), intransaction_pos(0) {}
+            TestExtState() : intransaction_pos(0) {}
 
             virtual slave::State getState() { return slave::State(); }
             virtual void setConnecting() {}
@@ -132,19 +132,28 @@ namespace // anonymous
             virtual time_t getLastUpdateTime() { return 0; }
             virtual time_t getLastEventTime() { return 0; }
             virtual unsigned long getIntransactionPos() { return intransaction_pos; }
-            virtual void setMasterLogNamePos(const std::string& log_name, unsigned long pos)
+            virtual void setMasterPosition(const slave::Position& pos)
             {
                 {
                     std::lock_guard<std::mutex> lock(m_Mutex);
-                    master_log_name = log_name;
-                    master_log_pos = intransaction_pos = pos;
+                    position = pos;
+                    intransaction_pos = pos.log_pos;
                 }
                 m_CondVariable.notify_one();
             }
-            virtual unsigned long getMasterLogPos() { return master_log_pos; }
-            virtual std::string getMasterLogName() { return master_log_name; }
-            virtual void saveMasterInfo() {}
-            virtual bool loadMasterInfo(std::string& logname, unsigned long& pos) { logname.clear(); pos = 0; return false; }
+            virtual void saveMasterPosition() {}
+            virtual bool loadMasterPosition(slave::Position& pos) { pos.clear(); return false; }
+            virtual bool getMasterPosition(slave::Position& pos)
+            {
+                if (!position.empty())
+                {
+                    pos = position;
+                    if (intransaction_pos)
+                        pos.log_pos = intransaction_pos;
+                    return true;
+                }
+                return loadMasterPosition(pos);
+            }
             virtual unsigned int getConnectCount() { return 0; }
             virtual void setStateProcessing(bool _state) {}
             virtual bool getStateProcessing() { return false; }
@@ -152,8 +161,7 @@ namespace // anonymous
             virtual void incTableCount(const std::string& t) {}
 
         private:
-            std::string     master_log_name;
-            unsigned long   master_log_pos;
+            slave::Position position;
             unsigned long   intransaction_pos;
         };
 
@@ -175,10 +183,10 @@ namespace // anonymous
 
             struct Counter
             {
-                uint64_t total   = 0;
-                uint64_t ignored = 0;
-                time_t   done    = 0;
-                time_t   failed  = 0;
+                uint64_t ignored  = 0;
+                uint64_t done     = 0;
+                uint64_t failed   = 0;
+                time_t   row_done = 0;
             };
 
             std::map<std::pair<std::string, std::string>, unsigned long>  map_table;
@@ -212,63 +220,40 @@ namespace // anonymous
 
             virtual void tickOther() { ++events_other; }
 
-            virtual void tickModifyIgnored(const unsigned long id, slave::EventKind kind)
+            virtual void tickModifyEventIgnored(const unsigned long id, slave::EventKind kind)
             {
                 ++events_modify;
 
-                Counter sCounter;
-                if (map_kind.find(kind) == map_kind.end())
-                    map_kind[kind] = sCounter;
-
                 const auto key = std::make_pair(id, kind);
-                if (map_detailed.find(key) == map_detailed.end())
-                    map_detailed[key] = sCounter;
-
-                map_kind[kind].total      += 1;
                 map_kind[kind].ignored    += 1;
-                map_detailed[key].total   += 1;
                 map_detailed[key].ignored += 1;
             }
 
-            virtual void tickModifyDone(const unsigned long id, slave::EventKind kind, uint64_t time)
+            virtual void tickModifyEventDone(const unsigned long id, slave::EventKind kind)
             {
                 ++events_modify;
 
-                Counter sCounter;
-                if (map_kind.find(kind) == map_kind.end())
-                    map_kind[kind] = sCounter;
-
                 const auto key = std::make_pair(id, kind);
-                if (map_detailed.find(key) == map_detailed.end())
-                    map_detailed[key] = sCounter;
-
-                map_kind[kind].total    += 1;
-                map_kind[kind].done     += time;
-                map_detailed[key].total += 1;
-                map_detailed[key].done  += time;
+                map_kind[kind].done    += 1;
+                map_detailed[key].done += 1;
             }
 
-            virtual void tickModifyFailed(const unsigned long id, slave::EventKind kind, uint64_t time)
+            virtual void tickModifyEventFailed(const unsigned long id, slave::EventKind kind)
             {
                 ++events_modify;
 
-                Counter sCounter;
-                if (map_kind.find(kind) == map_kind.end())
-                    map_kind[kind] = sCounter;
-
                 const auto key = std::make_pair(id, kind);
-                if (map_detailed.find(key) == map_detailed.end())
-                    map_detailed[key] = sCounter;
-
-                map_kind[kind].total     += 1;
-                map_kind[kind].failed    += time;
-                map_detailed[key].total  += 1;
-                map_detailed[key].failed += time;
+                map_kind[kind].failed    += 1;
+                map_detailed[key].failed += 1;
             }
 
-            virtual void tickModifyRow()
+            virtual void tickModifyRowDone(const unsigned long id, slave::EventKind kind, uint64_t time)
             {
                 ++rows_modify;
+
+                const auto key = std::make_pair(id, kind);
+                map_kind[kind].row_done    += time;
+                map_detailed[key].row_done += time;
             }
         };
 
@@ -500,20 +485,23 @@ namespace // anonymous
 
         void waitCall()
         {
-            std::string   log_name;
-            unsigned long log_pos = 0;
+            slave::Position pos;
             conn->query("SHOW MASTER STATUS");
-            conn->use([&log_name, &log_pos](const nanomysql::fields_t& row)
+            conn->use([&pos](const nanomysql::fields_t& row)
             {
-                log_name = row.at("File").data;
-                log_pos = std::stoul(row.at("Position").data);
+                pos.log_name = row.at("File").data;
+                pos.log_pos = std::stoul(row.at("Position").data);
+                auto it = row.find("Executed_Gtid_Set");
+                if (it != row.end())
+                    pos.parseGtid(it->second.data);
             });
 
             std::unique_lock<std::mutex> lock(m_ExtState.m_Mutex);
-            if (!m_ExtState.m_CondVariable.wait_for(lock, std::chrono::milliseconds(2000), [this, &log_name, &log_pos]
+            if (!m_ExtState.m_CondVariable.wait_for(lock, std::chrono::milliseconds(2000), [this, &pos]
             {
-                return log_name == m_ExtState.getMasterLogName() && \
-                       log_pos  == m_ExtState.getMasterLogPos();
+                slave::Position posTmp;
+                m_ExtState.getMasterPosition(posTmp);
+                return posTmp.reachedOtherPos(pos);
             }))
                 BOOST_ERROR("Condition variable timed out");
         }
@@ -712,20 +700,16 @@ namespace // anonymous
     struct CheckBinlogPos
     {
         const slave::Slave& m_Slave;
-        slave::Slave::binlog_pos_t m_LastPos;
+        slave::Position     m_LastPos;
 
-        CheckBinlogPos(const slave::Slave& aSlave, const slave::Slave::binlog_pos_t& aLastPos)
+        CheckBinlogPos(const slave::Slave& aSlave, const slave::Position& aLastPos)
         :   m_Slave(aSlave), m_LastPos(aLastPos)
         {}
 
         bool operator() () const
         {
             const slave::MasterInfo& sMasterInfo = m_Slave.masterInfo();
-            if (sMasterInfo.master_log_name > m_LastPos.first
-            || (sMasterInfo.master_log_name == m_LastPos.first
-                && sMasterInfo.master_log_pos >= m_LastPos.second))
-                return true;
-            return false;
+            return sMasterInfo.position.reachedOtherPos(m_LastPos);
         }
     };
 
@@ -754,7 +738,7 @@ namespace // anonymous
         f.checkInsertValue(uint32_t(12321), "12321", "");
 
         // Remember position.
-        const slave::Slave::binlog_pos_t sInitialBinlogPos = f.m_Slave.getLastBinlog();
+        const auto sInitialBinlogPos = f.m_Slave.getLastBinlogPos();
 
         // Insert value, read it.
         f.checkInsertValue(uint32_t(12322), "12322", "");
@@ -765,13 +749,12 @@ namespace // anonymous
         f.conn->query("INSERT INTO test VALUES (345234)");
 
         // And get new position.
-        const slave::Slave::binlog_pos_t sCurBinlogPos = f.m_Slave.getLastBinlog();
-        BOOST_CHECK_NE(sCurBinlogPos.second, sInitialBinlogPos.second);
+        const auto sCurBinlogPos = f.m_Slave.getLastBinlogPos();
+        BOOST_CHECK_NE(sCurBinlogPos.log_pos, sInitialBinlogPos.log_pos);
 
         // Now set old position in slave and check that 2 INSERTs will have been read (12322 and 345234).
         slave::MasterInfo sMasterInfo = f.m_Slave.masterInfo();
-        sMasterInfo.master_log_name = sInitialBinlogPos.first;
-        sMasterInfo.master_log_pos = sInitialBinlogPos.second;
+        sMasterInfo.position = sInitialBinlogPos;
         f.m_Slave.setMasterInfo(sMasterInfo);
 
         CallbackCounter sCallback;
@@ -1120,10 +1103,6 @@ namespace // anonymous
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,              4);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_rotate,             1);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                2);
-            if (f.m_Slave.masterVersion() < 50700)
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
-            else
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              4);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             2);
 
             auto sPair = std::make_pair(f.cfg.mysql_db, "test");
@@ -1140,8 +1119,6 @@ namespace // anonymous
                 if (kind == slave::eInsert)
                     ++sFlag;
 
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,      sFlag);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,   sFlag);
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].ignored,    sShouldNotProcess * sFlag);
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].ignored, sShouldNotProcess * sFlag);
 
@@ -1149,11 +1126,15 @@ namespace // anonymous
                 {
                     BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].done,    0);
                     BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].done, 0);
+                    BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].row_done,    0);
+                    BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].row_done, 0);
                 }
                 else
                 {
                     BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].done,    0);
                     BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].done, 0);
+                    BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].row_done,    0);
+                    BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].row_done, 0);
                 }
 
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,  0);
@@ -1198,16 +1179,12 @@ namespace // anonymous
 
             if (kind == slave::eInsert)
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,     1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].failed,    0);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,  1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].failed, 0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,    1);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].failed, 1);
             }
             else
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,     0);
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,    0);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,  0);
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].failed, 0);
             }
         }
@@ -1284,10 +1261,6 @@ namespace // anonymous
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_query,              6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_rotate,             1);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_xid,                4);
-        if (f.m_Slave.masterVersion() < 50700)
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              0);
-        else
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.events_other,              6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.events_modify,             6);
         BOOST_CHECK_EQUAL(f.m_SlaveStat.rows_modify,               6);
 
@@ -1298,15 +1271,13 @@ namespace // anonymous
 
         for (auto& kind: slave::eventKindList())
         {
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].total,   2);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].ignored, 0);
-            BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].done,    0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].done,    2);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_kind[kind].failed,  0);
 
             const auto key = std::make_pair(id, kind);
-            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].total,   2);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].ignored, 0);
-            BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].done,    0);
+            BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].done,    2);
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[key].failed,  0);
         }
     }
@@ -1335,13 +1306,13 @@ namespace // anonymous
 
             if (kind == slave::eInsert)
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
             else
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   0);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
 
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].ignored, 0);
@@ -1365,13 +1336,13 @@ namespace // anonymous
 
             if (kind == slave::eInsert)
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
             else
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].total,   0);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
 
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].ignored, 0);
@@ -1379,13 +1350,13 @@ namespace // anonymous
 
             if (kind == slave::eDelete)
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].total,   0);
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].done,     0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].row_done, 0);
             }
             else
             {
-                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].total,   1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyTest].done,    0);
+                BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].done,     1);
+                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyTest].row_done, 0);
             }
 
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].ignored, 0);
@@ -1569,6 +1540,102 @@ namespace // anonymous
 
         f.conn->query("ALTER TABLE test.stat DROP COLUMN value, ADD COLUMN value int");
         f.checkInsertValue(uint32_t(12321), "12321", "", "stat");
+
+        f.conn->query("DROP TABLE IF EXISTS stat");
+        f.conn->query("CREATE TABLE IF NOT EXISTS `stat` (value int)");
+        f.checkInsertValue(uint32_t(12), "12", "", "stat");
+
+        f.conn->query("ALTER TABLE `test`.`stat` DROP COLUMN `value`, ADD COLUMN `value` varchar(50)");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "", "stat");
+
+        f.conn->query("DROP TABLE IF EXISTS stat");
+        f.conn->query("CREATE TABLE IF NOT EXISTS `stat`\n(value varchar(50))");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "", "stat");
+
+        f.conn->query("ALTER TABLE `stat` \n    DROP COLUMN `value`,\n    ADD COLUMN value int");
+        f.checkInsertValue(uint32_t(12), "12", "", "stat");
+    }
+
+    void test_GtidParsing()
+    {
+        slave::Position pos;
+        const std::string uuidText = "24f7c945-c871-11e6-9461-0242ac110006";
+        const std::string uuid = "24f7c945c87111e694610242ac110006";
+
+        pos.parseGtid(uuidText + ":1");
+        BOOST_CHECK(pos.gtid_executed.find(uuid) != pos.gtid_executed.end());
+        const auto& ref1 = pos.gtid_executed[uuid];
+        BOOST_CHECK_EQUAL(ref1.size(), 1);
+        BOOST_CHECK(ref1.front() == slave::gtid_interval_t(1, 1));
+
+        pos.clear();
+        pos.parseGtid(uuidText + ":1-697");
+        BOOST_CHECK(pos.gtid_executed.find(uuid) != pos.gtid_executed.end());
+        const auto& ref2 = pos.gtid_executed[uuid];
+        BOOST_CHECK_EQUAL(ref2.size(), 1);
+        BOOST_CHECK(ref2.front() == slave::gtid_interval_t(1, 697));
+
+        pos.clear();
+        pos.parseGtid(uuidText + ":1-697:704:706-710");
+        BOOST_CHECK(pos.gtid_executed.find(uuid) != pos.gtid_executed.end());
+        const auto& ref3 = pos.gtid_executed[uuid];
+        BOOST_CHECK_EQUAL(ref3.size(), 3);
+        BOOST_CHECK(ref3.front() == slave::gtid_interval_t(1, 697));
+        BOOST_CHECK(*std::next(ref3.begin()) == slave::gtid_interval_t(704, 704));
+        BOOST_CHECK(ref3.back() == slave::gtid_interval_t(706, 710));
+
+        pos.clear();
+        const std::string uuidText2 = "ae00751a-cb5f-11e6-9d92-e03f490fd3db";
+        const std::string uuid2 = "ae00751acb5f11e69d92e03f490fd3db";
+        const std::string uuidText3 = "ae00751a-cb5f-11e6-9d92-e03f490fd3de";
+        const std::string uuid3 = "ae00751acb5f11e69d92e03f490fd3de";
+        pos.parseGtid(uuidText + ":1-697, \n" + uuidText2 + ":1-14, " + uuidText3 + ":34\n");
+        BOOST_CHECK(pos.gtid_executed.find(uuid) != pos.gtid_executed.end());
+        BOOST_CHECK(pos.gtid_executed.find(uuid2) != pos.gtid_executed.end());
+        BOOST_CHECK(pos.gtid_executed.find(uuid3) != pos.gtid_executed.end());
+        const auto& ref4 = pos.gtid_executed[uuid];
+        const auto& ref5 = pos.gtid_executed[uuid2];
+        const auto& ref6 = pos.gtid_executed[uuid3];
+        BOOST_CHECK_EQUAL(ref4.size(), 1);
+        BOOST_CHECK_EQUAL(ref5.size(), 1);
+        BOOST_CHECK_EQUAL(ref6.size(), 1);
+        BOOST_CHECK(ref4.front() == slave::gtid_interval_t(1, 697));
+        BOOST_CHECK(ref5.front() == slave::gtid_interval_t(1, 14));
+        BOOST_CHECK(ref6.front() == slave::gtid_interval_t(34, 34));
+    }
+
+    void test_GtidAdding()
+    {
+        slave::Position pos;
+        const std::string uuidText = "24f7c945-c871-11e6-9461-0242ac110006";
+        const std::string uuid = "24f7c945c87111e694610242ac110006";
+        pos.parseGtid(uuidText + ":2-4");
+        const auto& ref = pos.gtid_executed[uuid];
+
+        pos.addGtid(slave::gtid_t(uuid, 6));
+        BOOST_CHECK_EQUAL(ref.size(), 2);
+        BOOST_CHECK(ref.front() == slave::gtid_interval_t(2, 4));
+        BOOST_CHECK(ref.back() == slave::gtid_interval_t(6, 6));
+
+        pos.addGtid(slave::gtid_t(uuid, 5));
+        BOOST_CHECK_EQUAL(ref.size(), 1);
+        BOOST_CHECK(ref.front() == slave::gtid_interval_t(2, 6));
+
+        pos.addGtid(slave::gtid_t(uuid, 1));
+        BOOST_CHECK_EQUAL(ref.size(), 1);
+        BOOST_CHECK(ref.front() == slave::gtid_interval_t(1, 6));
+
+        pos.addGtid(slave::gtid_t(uuid, 7));
+        BOOST_CHECK_EQUAL(ref.size(), 1);
+        BOOST_CHECK(ref.front() == slave::gtid_interval_t(1, 7));
+
+        const std::string uuid2 = "ae00751acb5f11e69d92e03f490fd3db";
+        pos.addGtid(slave::gtid_t(uuid2, 2));
+        BOOST_CHECK_EQUAL(ref.size(), 1);
+        BOOST_CHECK(ref.front() == slave::gtid_interval_t(1, 7));
+        const auto& ref2 = pos.gtid_executed[uuid2];
+        BOOST_CHECK_EQUAL(ref2.size(), 1);
+        BOOST_CHECK(ref2.front() == slave::gtid_interval_t(2, 2));
     }
 }// anonymous-namespace
 
@@ -1584,6 +1651,8 @@ test_suite* init_unit_test_suite(int argc, char* argv[])
     ADD_FIXTURE_TEST(test_Stat);
     ADD_FIXTURE_TEST(test_BinlogRowImageOption);
     ADD_FIXTURE_TEST(test_AlterCreateTable);
+    ADD_FIXTURE_TEST(test_GtidParsing);
+    ADD_FIXTURE_TEST(test_GtidAdding);
 
 #undef ADD_FIXTURE_TEST
 
