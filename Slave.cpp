@@ -851,11 +851,17 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo& m_rli
 
         slave::Table_map_event_info tmi(bei.buf, bei.event_len);
 
+        const auto table_key = std::make_pair(tmi.m_dbnam, tmi.m_tblnam);
+        if (m_table_order.find(table_key) == m_table_order.cend()) {
+            LOG_TRACE(log, "Ignoring TABLE_MAP_EVENT for unreplicated table");
+            break;
+        }
+
         m_rli.setTableName(tmi.m_table_id, tmi.m_tblnam, tmi.m_dbnam);
 
         if (m_master_version >= 50604)
         {
-            const auto& table = m_rli.getTable(std::make_pair(tmi.m_dbnam, tmi.m_tblnam));
+            const auto& table = m_rli.getTable(table_key);
             if (table && tmi.m_cols_types.size() == table->fields.size())
             {
                 int i = 0;
