@@ -456,11 +456,20 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
 
         if (null_bits & null_mask) {
 
-            LOG_TRACE(log, "set_null found");
+            LOG_TRACE(log, "field with NULL value found");
+
+            // We don't unpack the field if it was NULL,
+            // and put empty boost::any value to slave::Row's map
+            // in order to indicate presence of NULL value.
+
+            if (table->column_filter.empty() || table->column_filter[i / 8] & (1 << (i & 7)))
+            {
+                _row[field->getFieldName()] = std::make_pair(field->field_type, boost::any());
+            }
 
         } else {
 
-            // We only unpack the field if it was non-null
+            // We unpack the field to some certain value if it was NOT NULL
 
             ptr = (unsigned char*)field->unpack((const char*)ptr);
 
