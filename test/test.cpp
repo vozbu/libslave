@@ -29,6 +29,12 @@ std::string print(const std::string& type, const boost::any& v) {
         else if (v.type() == typeid(unsigned int))
             s << boost::any_cast<unsigned int>(v);
 
+        else if (v.type() == typeid(char))
+            s << boost::any_cast<char>(v);
+
+        else if (v.type() == typeid(float))
+            s << boost::any_cast<float>(v);
+
         else if (v.type() == typeid(double))
             s << boost::any_cast<double>(v);
 
