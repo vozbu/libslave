@@ -69,6 +69,25 @@ void callback(const slave::RecordSet& event) {
 
     for (slave::Row::const_iterator i = event.m_row.begin(); i != event.m_row.end(); ++i) {
 
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+        const std::string value = print(i->first, i->second);
+
+        const unsigned index = i - event.m_row.begin();
+        std::cout << "  " << index << " : " << i->first << " -> " << value;
+
+        if (event.type_event == slave::RecordSet::Update) {
+
+            std::string old_value("NULL");
+
+            if (index < event.m_old_row.size())
+                old_value = print(event.m_old_row[index].first, event.m_old_row[index].second);
+
+            if (value != old_value)
+                std::cout << "    (was: " << old_value << ")";
+        }
+
+        std::cout << "\n";
+#else
         std::string value = print(i->second.second);
 
         std::cout << "  " << i->first << " : " << i->second.first << " -> " << value;
@@ -87,6 +106,7 @@ void callback(const slave::RecordSet& event) {
         }
 
         std::cout << "\n";
+#endif
     }
 
     std::cout << "  @ts = "  << event.when << "\n"

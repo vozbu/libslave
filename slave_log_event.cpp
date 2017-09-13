@@ -435,9 +435,16 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
     unsigned int null_mask = 1U;
     unsigned char null_bits = *null_ptr++;
 
-    int field_count = table->fields.size();
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+    const bool all_fields = table->column_filter.empty();
+    if (all_fields)
+        _row.reserve(colcnt);
+    else
+        _row.resize(table->column_filter_count);
+#endif
 
-    for (int i = 0; i < field_count; i++) {
+    for (unsigned i = 0; i < colcnt; i++)
+    {
 
         slave::PtrField field = table->fields[i];
 
@@ -462,20 +469,34 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
             // and put empty boost::any value to slave::Row's map
             // in order to indicate presence of NULL value.
 
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+            if (all_fields)
+                _row.emplace_back(field->field_type, nullFieldValue());
+            else if (table->column_filter[i / 8] & (1 << (i & 7)))
+                _row[table->column_filter_fields[i]] = std::make_pair(field->field_type, nullFieldValue());
+#else
             if (table->column_filter.empty() || table->column_filter[i / 8] & (1 << (i & 7)))
             {
                 _row[field->getFieldName()] = std::make_pair(field->field_type, nullFieldValue());
             }
-
-        } else {
-
+#endif
+        }
+        else
+        {
             // We unpack the field to some certain value if it was NOT NULL
 
             ptr = (unsigned char*)field->unpack((const char*)ptr);
 
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+            if (all_fields)
+                _row.emplace_back(field->field_type, field->field_data);
+            else if (table->column_filter[i / 8] & (1 << (i & 7)))
+                _row[table->column_filter_fields[i]] = std::make_pair(field->field_type, field->field_data);
+#else
             if (table->column_filter.empty() || table->column_filter[i / 8] & (1 << (i & 7))) {
                 _row[field->getFieldName()] = std::make_pair(field->field_type, field->field_data);
             }
+#endif
         }
 
         null_mask <<= 1;

@@ -24,7 +24,11 @@ namespace slave
 {
 
 // One row in a table. Key -- field name, value - pair of (field type, value)
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+typedef std::vector<std::pair<std::string, FieldValue>> Row;
+#else
 typedef std::map<std::string, std::pair<std::string, FieldValue>> Row;
+#endif
 
 struct RecordSet
 {

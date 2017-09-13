@@ -43,6 +43,10 @@ public:
 
     std::vector<PtrField> fields;
     std::vector<unsigned char> column_filter;
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+    std::vector<unsigned> column_filter_fields;
+    unsigned column_filter_count;
+#endif
 
     callback m_callback;
     EventKind m_filter;
@@ -59,12 +63,23 @@ public:
     void set_column_filter(const std::vector<std::string> &_column_filter) {
         if (_column_filter.empty()) {
             column_filter.clear();
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+            column_filter_fields.clear();
+            column_filter_count = 0;
+#endif
             return;
         }
 
         column_filter.resize((fields.size() + 7)/8);
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+        column_filter_fields.resize(fields.size());
+        column_filter_count = _column_filter.size();
+#endif
         for (unsigned i = 0; i < column_filter.size(); i++) {
             column_filter[i] = 0;
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+            column_filter_fields[i] = 0;
+#endif
         }
 
         // FIXME: this loop has complexity factor of O(N*M)
@@ -75,6 +90,9 @@ public:
                 if (field->getFieldName() == field_name) {
                     const int index = j - fields.begin();
                     column_filter[index>>3] |= (1<<(index&7));
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+                    column_filter_fields[index] = i - _column_filter.begin();
+#endif
                     break;
                 }
             }
@@ -87,6 +105,9 @@ public:
     std::string full_name;
 
     Table(const std::string& db_name, const std::string& tbl_name) :
+#ifdef USE_VECTOR_FOR_ROW_STORAGE
+        column_filter_count(0),
+#endif
         table_name(tbl_name), database_name(db_name),
         full_name(database_name + "." + table_name)
         {}
