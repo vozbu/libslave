@@ -464,7 +464,7 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
 
             if (table->column_filter.empty() || table->column_filter[i / 8] & (1 << (i & 7)))
             {
-                _row[field->getFieldName()] = std::make_pair(field->field_type, boost::any());
+                _row[field->getFieldName()] = std::make_pair(field->field_type, nullFieldValue());
             }
 
         } else {

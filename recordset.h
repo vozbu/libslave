@@ -15,15 +15,16 @@
 #ifndef __SLAVE_RECORDSET_H_
 #define __SLAVE_RECORDSET_H_
 
-#include <boost/any.hpp>
 #include <map>
 #include <string>
+
+#include "types.h"
 
 namespace slave
 {
 
 // One row in a table. Key -- field name, value - pair of (field type, value)
-typedef std::map<std::string, std::pair<std::string, boost::any> > Row;
+typedef std::map<std::string, std::pair<std::string, FieldValue>> Row;
 
 struct RecordSet
 {

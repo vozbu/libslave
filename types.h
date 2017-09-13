@@ -5,6 +5,18 @@
 #include <string>
 #include <time.h>
 
+// conflict with macro defined in mysql
+#ifdef test
+#undef test
+#endif /* test */
+
+#ifdef SLAVE_USE_VARIANT_FOR_FIELD_VALUE
+#include <cstddef>              // for std::nullptr_t
+#include <boost/variant.hpp>
+#else
+#include <boost/any.hpp>
+#endif
+
 namespace slave {
 namespace types
 {
@@ -74,6 +86,31 @@ namespace types
         return mktime(&t);
     }
 }// types
+
+#ifdef SLAVE_USE_VARIANT_FOR_FIELD_VALUE
+    using FieldValue = boost::variant<std::nullptr_t
+                                    , int
+                                    , char
+                                    , int32_t
+                                    , uint32_t
+                                    , long
+                                    , unsigned long long
+                                    , float
+                                    , double
+                                    , std::string
+                                    >;
+    inline std::nullptr_t nullFieldValue() { return nullptr; }
+    inline bool isNullFieldValue(const FieldValue& v) { return v.type() == typeid(std::nullptr_t); }
+    template <typename T>
+    const T& get(const FieldValue& v) { return boost::get<T>(v); }
+#else
+    using FieldValue = boost::any;
+    inline boost::any nullFieldValue() { return boost::any(); }
+    inline bool isNullFieldValue(const FieldValue& v) { return v.empty(); }
+    template <typename T>
+    T get(const FieldValue& v) { return boost::any_cast<T>(v); }
+#endif
+
 }// slave
 
 #endif
