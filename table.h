@@ -51,8 +51,8 @@ public:
     callback m_callback;
     EventKind m_filter;
 
-    void call_callback(slave::RecordSet& _rs, ExtStateIface &ext_state) {
-
+    void call_callback(slave::RecordSet& _rs, ExtStateIface &ext_state) const
+    {
         // Some stats
         ext_state.incTableCount(full_name);
         ext_state.setLastFilteredUpdateTime();

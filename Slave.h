@@ -145,10 +145,6 @@ public:
         }
     }
 
-    RelayLogInfo getRli() const {
-        return m_rli;
-    }
-
     table_order_t getTableOrder() const {
         return m_table_order;
     }

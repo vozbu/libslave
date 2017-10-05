@@ -14,6 +14,7 @@
 
 
 #include <algorithm>
+#include <memory>
 #include <regex>
 #include <string>
 
@@ -175,8 +176,7 @@ void Slave::createTable(RelayLogInfo& rli,
     conn.query("SHOW FULL COLUMNS FROM " + tbl_name + " IN " + db_name);
     conn.store(res);
 
-    std::shared_ptr<Table> table(new Table(db_name, tbl_name));
-
+    std::unique_ptr<Table> table(new Table(db_name, tbl_name));
 
     LOG_DEBUG(log, "Created new Table object: database:" << db_name << " table: " << tbl_name );
 
@@ -336,7 +336,7 @@ void Slave::createTable(RelayLogInfo& rli,
     }
 
 
-    rli.setTable(tbl_name, db_name, table);
+    rli.setTable(tbl_name, db_name, std::move(table));
 
 }
 
@@ -854,7 +854,7 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo& m_rli
 
         if (m_master_version >= 50604)
         {
-            auto table = m_rli.getTable(std::make_pair(tmi.m_dbnam, tmi.m_tblnam));
+            const auto& table = m_rli.getTable(std::make_pair(tmi.m_dbnam, tmi.m_tblnam));
             if (table && tmi.m_cols_types.size() == table->fields.size())
             {
                 int i = 0;

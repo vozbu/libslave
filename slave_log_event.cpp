@@ -408,18 +408,19 @@ size_t n_set_bits(const std::vector<unsigned char>& b, unsigned int count) {
 }
 
 
-unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
+unsigned char* unpack_row(const slave::Table& table,
                           slave::Row& _row,
                           unsigned int colcnt,
                           unsigned char* row,
                           const std::vector<unsigned char>& cols)
 {
 
-    LOG_TRACE(log, "Unpacking row: " << table->fields.size() << "," << colcnt << "," << cols.size());
+    LOG_TRACE(log, "Unpacking row: " << "fields in the table " << table.fields.size() << ", fields in the event " << colcnt
+             << ", bitfield width " << cols.size());
 
-    if (colcnt != table->fields.size()) {
+    if (colcnt != table.fields.size()) {
         LOG_ERROR(log, "Field count mismatch in unpacking row for "
-                  << table->full_name << ": " << colcnt << " != " << table->fields.size());
+                  << table.full_name << ": " << colcnt << " != " << table.fields.size());
         throw std::runtime_error("unpack_row failed");
     }
 
@@ -436,17 +437,16 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
     unsigned char null_bits = *null_ptr++;
 
 #ifdef USE_VECTOR_FOR_ROW_STORAGE
-    const bool all_fields = table->column_filter.empty();
+    const bool all_fields = table.column_filter.empty();
     if (all_fields)
         _row.reserve(colcnt);
     else
-        _row.resize(table->column_filter_count);
+        _row.resize(table.column_filter_count);
 #endif
 
     for (unsigned i = 0; i < colcnt; i++)
     {
-
-        slave::PtrField field = table->fields[i];
+        slave::PtrField field = table.fields[i];
 
         if (!cols.empty() && !(cols[i / 8] & (1 << (i & 7)))) {
 
@@ -472,10 +472,10 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
 #ifdef USE_VECTOR_FOR_ROW_STORAGE
             if (all_fields)
                 _row.emplace_back(field->field_type, nullFieldValue());
-            else if (table->column_filter[i / 8] & (1 << (i & 7)))
-                _row[table->column_filter_fields[i]] = std::make_pair(field->field_type, nullFieldValue());
+            else if (table.column_filter[i / 8] & (1 << (i & 7)))
+                _row[table.column_filter_fields[i]] = std::make_pair(field->field_type, nullFieldValue());
 #else
-            if (table->column_filter.empty() || table->column_filter[i / 8] & (1 << (i & 7)))
+            if (table.column_filter.empty() || table.column_filter[i / 8] & (1 << (i & 7)))
             {
                 _row[field->getFieldName()] = std::make_pair(field->field_type, nullFieldValue());
             }
@@ -490,10 +490,10 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
 #ifdef USE_VECTOR_FOR_ROW_STORAGE
             if (all_fields)
                 _row.emplace_back(field->field_type, field->field_data);
-            else if (table->column_filter[i / 8] & (1 << (i & 7)))
-                _row[table->column_filter_fields[i]] = std::make_pair(field->field_type, field->field_data);
+            else if (table.column_filter[i / 8] & (1 << (i & 7)))
+                _row[table.column_filter_fields[i]] = std::make_pair(field->field_type, field->field_data);
 #else
-            if (table->column_filter.empty() || table->column_filter[i / 8] & (1 << (i & 7))) {
+            if (table.column_filter.empty() || table.column_filter[i / 8] & (1 << (i & 7))) {
                 _row[field->getFieldName()] = std::make_pair(field->field_type, field->field_data);
             }
 #endif
@@ -509,7 +509,7 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
 }
 
 
-unsigned char* do_writedelete_row(std::shared_ptr<slave::Table> table,
+unsigned char* do_writedelete_row(const slave::Table& table,
                                   const Basic_event_info& bei,
                                   const Row_event_info& roi,
                                   unsigned char* row_start,
@@ -524,17 +524,17 @@ unsigned char* do_writedelete_row(std::shared_ptr<slave::Table> table,
     }
 
     _record_set.when = bei.when;
-    _record_set.tbl_name = table->table_name;
-    _record_set.db_name = table->database_name;
+    _record_set.tbl_name = table.table_name;
+    _record_set.db_name = table.database_name;
     _record_set.type_event = (bei.type == WRITE_ROWS_EVENT_V1 || bei.type == WRITE_ROWS_EVENT ? slave::RecordSet::Write : slave::RecordSet::Delete);
     _record_set.master_id = bei.server_id;
 
-    table->call_callback(_record_set, ext_state);
+    table.call_callback(_record_set, ext_state);
 
     return t;
 }
 
-unsigned char* do_update_row(std::shared_ptr<slave::Table> table,
+unsigned char* do_update_row(const slave::Table& table,
                              const Basic_event_info& bei,
                              const Row_event_info& roi,
                              unsigned char* row_start,
@@ -555,12 +555,12 @@ unsigned char* do_update_row(std::shared_ptr<slave::Table> table,
     }
 
     _record_set.when = bei.when;
-    _record_set.tbl_name = table->table_name;
-    _record_set.db_name = table->database_name;
+    _record_set.tbl_name = table.table_name;
+    _record_set.db_name = table.database_name;
     _record_set.type_event = slave::RecordSet::Update;
     _record_set.master_id = bei.server_id;
 
-    table->call_callback(_record_set, ext_state);
+    table.call_callback(_record_set, ext_state);
 
     return t;
 }
@@ -599,7 +599,7 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
 
     LOG_DEBUG(log, "applyRowEvent(): " << roi.m_table_id << " " << key.first << "." << key.second);
 
-    std::shared_ptr<slave::Table> table = rli.getTable(key);
+    const auto& table = rli.getTable(key);
 
     if (table) {
 
@@ -616,10 +616,10 @@ void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, cons
                 {
                     if (kind == eUpdate) {
 
-                        row_start = do_update_row(table, bei, roi, row_start, ext_state);
+                        row_start = do_update_row(*table, bei, roi, row_start, ext_state);
 
                     } else {
-                        row_start = do_writedelete_row(table, bei, roi, row_start, ext_state);
+                        row_start = do_writedelete_row(*table, bei, roi, row_start, ext_state);
                     }
                 }
                 catch (...)
