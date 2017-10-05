@@ -1163,8 +1163,8 @@ namespace // anonymous
                 {
                     BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].done,    0);
                     BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].done, 0);
-                    BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].row_done,    0);
-                    BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].row_done, 0);
+                    BOOST_CHECK_GE(   f.m_SlaveStat.map_kind[kind].row_done,    0);
+                    BOOST_CHECK_GE(   f.m_SlaveStat.map_detailed[key].row_done, 0);
                 }
                 else
                 {
@@ -1344,7 +1344,7 @@ namespace // anonymous
             if (kind == slave::eInsert)
             {
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
+                BOOST_CHECK_GE(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
             else
             {
@@ -1374,7 +1374,7 @@ namespace // anonymous
             if (kind == slave::eInsert)
             {
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
+                BOOST_CHECK_GE(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
             else
             {
@@ -1393,7 +1393,7 @@ namespace // anonymous
             else
             {
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].done,     1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyTest].row_done, 0);
+                BOOST_CHECK_GE(   f.m_SlaveStat.map_detailed[sKeyTest].row_done, 0);
             }
 
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].ignored, 0);
