@@ -49,8 +49,8 @@ public:
         m_map_table_name[table_id] = std::make_pair(db_name, table_name);
     }
 
-    const std::pair<std::string,std::string> getTableNameById(int table_id) {
-
+    const std::pair<std::string,std::string> getTableNameById(int table_id) const
+    {
         id_to_name_t::const_iterator p = m_map_table_name.find(table_id);
 
         if (p != m_map_table_name.end()) {
@@ -60,8 +60,9 @@ public:
         }
     }
 
-    std::shared_ptr<Table> getTable(const std::pair<std::string, std::string>& key) {
-        name_to_table_t::iterator p = m_table_map.find(key);
+    std::shared_ptr<Table> getTable(const std::pair<std::string, std::string>& key) const
+    {
+        name_to_table_t::const_iterator p = m_table_map.find(key);
 
         if (p != m_table_map.end()) {
             return p->second;
