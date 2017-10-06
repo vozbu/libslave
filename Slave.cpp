@@ -331,7 +331,7 @@ void Slave::createTable(RelayLogInfo& rli,
             throw std::runtime_error("class name does not exist: " + extract_field);
         }
 
-        table->fields.push_back(field);
+        table->fields.push_back(std::move(field));
 
     }
 

@@ -446,7 +446,7 @@ unsigned char* unpack_row(const slave::Table& table,
 
     for (unsigned i = 0; i < colcnt; i++)
     {
-        slave::PtrField field = table.fields[i];
+        const auto& field = table.fields[i];
 
         if (!cols.empty() && !(cols[i / 8] & (1 << (i & 7)))) {
 

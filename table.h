@@ -30,7 +30,7 @@
 namespace slave
 {
 
-typedef std::shared_ptr<Field> PtrField;
+typedef std::unique_ptr<Field> PtrField;
 typedef std::function<void (RecordSet&)> callback;
 typedef EventKind filter;
 
