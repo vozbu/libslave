@@ -93,7 +93,6 @@ namespace types
                                     , char
                                     , int32_t
                                     , uint32_t
-                                    , long
                                     , unsigned long long
                                     , float
                                     , double

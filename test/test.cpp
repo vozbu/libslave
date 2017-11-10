@@ -49,7 +49,7 @@ std::string print(const std::string& type, const slave::FieldValue& v) {
             s << "void";
 
         else
-            s << slave::get<long>(v);
+            s << "unknown type";
 
         return s.str();
     }
