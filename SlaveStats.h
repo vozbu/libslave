@@ -66,24 +66,14 @@ struct MasterInfo {
 };
 
 struct State {
-    time_t          connect_time;
-    time_t          last_filtered_update;
-    time_t          last_event_time;
-    time_t          last_update;
+    time_t          connect_time            = 0;
+    time_t          last_filtered_update    = 0;
+    time_t          last_event_time         = 0;
+    time_t          last_update             = 0;
     Position        position;
-    unsigned long   intransaction_pos;
-    unsigned int    connect_count;
-    bool            state_processing;
-
-    State() :
-        connect_time(0),
-        last_filtered_update(0),
-        last_event_time(0),
-        last_update(0),
-        intransaction_pos(0),
-        connect_count(0),
-        state_processing(false)
-    {}
+    unsigned long   intransaction_pos       = 0;
+    unsigned int    connect_count           = 0;
+    bool            state_processing        = false;
 };
 
 struct ExtStateIface {
