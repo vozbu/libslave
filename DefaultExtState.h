@@ -64,11 +64,21 @@ public:
         intransaction_pos = pos.log_pos;
     }
     void saveMasterPosition() override {}
+
+private:
+    bool loadMasterPositionNoLock(Position& pos)
+    {
+        // we could use std::recursive_mutex instead,
+        // but wicked toungues say it is a bad design
+        pos.clear();
+        return false;
+    }
+
+public:
     bool loadMasterPosition(Position& pos) override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        pos.clear();
-        return false;
+        return loadMasterPositionNoLock(pos);
     }
     bool getMasterPosition(Position& pos) override
     {
@@ -80,7 +90,7 @@ public:
                 pos.log_pos = intransaction_pos;
             return true;
         }
-        return loadMasterPosition(pos);
+        return loadMasterPositionNoLock(pos);
     }
     unsigned int getConnectCount() override
     {
