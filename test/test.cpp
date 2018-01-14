@@ -12,7 +12,7 @@
 volatile sig_atomic_t stop = 0;
 slave::Slave* sl = NULL;
 
-std::string print(const std::string& type, const slave::FieldValue& v) {
+std::string print(const slave::FieldValue& v) {
 
     if (v.type() == typeid(std::string)) {
 
@@ -69,7 +69,7 @@ void callback(const slave::RecordSet& event) {
 
     for (slave::Row::const_iterator i = event.m_row.begin(); i != event.m_row.end(); ++i) {
 
-        std::string value = print(i->second.first, i->second.second);
+        std::string value = print(i->second.second);
 
         std::cout << "  " << i->first << " : " << i->second.first << " -> " << value;
 
@@ -80,7 +80,7 @@ void callback(const slave::RecordSet& event) {
             std::string old_value("NULL");
 
             if (j != event.m_old_row.end())
-                old_value = print(i->second.first, j->second.second);
+                old_value = print(j->second.second);
 
             if (value != old_value)
                 std::cout << "    (was: " << old_value << ")";
