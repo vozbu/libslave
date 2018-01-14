@@ -40,8 +40,7 @@ struct RecordSet
     TypeEvent type_event;
 
     // Root master ID from which this record originated
-    unsigned int master_id;
-    RecordSet(): master_id(0) {}
+    unsigned int master_id = 0;
 };
 
 }// slave
