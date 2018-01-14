@@ -157,7 +157,7 @@ enum EventKind
     eInsert = (1 << 0),
     eUpdate = (1 << 1),
     eDelete = (1 << 2),
-    eAll    = (1 << 0) | (1 << 1) | (1 << 2)
+    eAll    = eInsert | eUpdate | eDelete,
 };
 
 typedef EventKind EventKindList[3];
