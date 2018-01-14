@@ -66,24 +66,14 @@ struct MasterInfo {
 };
 
 struct State {
-    time_t          connect_time;
-    time_t          last_filtered_update;
-    time_t          last_event_time;
-    time_t          last_update;
+    time_t          connect_time            = 0;
+    time_t          last_filtered_update    = 0;
+    time_t          last_event_time         = 0;
+    time_t          last_update             = 0;
     Position        position;
-    unsigned long   intransaction_pos;
-    unsigned int    connect_count;
-    bool            state_processing;
-
-    State() :
-        connect_time(0),
-        last_filtered_update(0),
-        last_event_time(0),
-        last_update(0),
-        intransaction_pos(0),
-        connect_count(0),
-        state_processing(false)
-    {}
+    unsigned long   intransaction_pos       = 0;
+    unsigned int    connect_count           = 0;
+    bool            state_processing        = false;
 };
 
 struct ExtStateIface {
@@ -126,21 +116,20 @@ struct ExtStateIface {
 
 // Stub object for answers on stats requests through StateHolder while libslave is not initialized yet.
 struct EmptyExtState: public ExtStateIface {
-    EmptyExtState() : intransaction_pos(0) {}
 
-    virtual State getState() { return State(); }
-    virtual void setConnecting() {}
-    virtual time_t getConnectTime() { return 0; }
-    virtual void setLastFilteredUpdateTime() {}
-    virtual time_t getLastFilteredUpdateTime() { return 0; }
-    virtual void setLastEventTimePos(time_t t, unsigned long pos) { intransaction_pos = pos; }
-    virtual time_t getLastUpdateTime() { return 0; }
-    virtual time_t getLastEventTime() { return 0; }
-    virtual unsigned long getIntransactionPos() { return intransaction_pos; }
-    virtual void setMasterPosition(const Position& pos) { position = pos; intransaction_pos = pos.log_pos; }
-    virtual void saveMasterPosition() {}
-    virtual bool loadMasterPosition(Position& pos) { pos.clear(); return false; }
-    virtual bool getMasterPosition(Position& pos)
+    State getState()                            override { return State(); }
+    void setConnecting()                        override {}
+    time_t getConnectTime()                     override { return 0; }
+    void setLastFilteredUpdateTime()            override {}
+    time_t getLastFilteredUpdateTime()          override { return 0; }
+    void setLastEventTimePos(time_t t, unsigned long pos) override { intransaction_pos = pos; }
+    time_t getLastUpdateTime()                  override { return 0; }
+    time_t getLastEventTime()                   override { return 0; }
+    unsigned long getIntransactionPos()         override { return intransaction_pos; }
+    void setMasterPosition(const Position& pos) override { position = pos; intransaction_pos = pos.log_pos; }
+    void saveMasterPosition()                   override {}
+    bool loadMasterPosition(Position& pos)      override { pos.clear(); return false; }
+    bool getMasterPosition(Position& pos)       override
     {
         if (!position.empty())
         {
@@ -151,15 +140,15 @@ struct EmptyExtState: public ExtStateIface {
         }
         return loadMasterPosition(pos);
     }
-    virtual unsigned int getConnectCount() { return 0; }
-    virtual void setStateProcessing(bool _state) {}
-    virtual bool getStateProcessing() { return false; }
-    virtual void initTableCount(const std::string& t) {}
-    virtual void incTableCount(const std::string& t) {}
+    unsigned int getConnectCount()              override { return 0; }
+    void setStateProcessing(bool _state)        override {}
+    bool getStateProcessing()                   override { return false; }
+    void initTableCount(const std::string& t)   override {}
+    void incTableCount(const std::string& t)    override {}
 
 private:
     Position        position;
-    unsigned long   intransaction_pos;
+    unsigned long   intransaction_pos = 0;
 };
 
 enum EventKind
@@ -168,7 +157,7 @@ enum EventKind
     eInsert = (1 << 0),
     eUpdate = (1 << 1),
     eDelete = (1 << 2),
-    eAll    = (1 << 0) | (1 << 1) | (1 << 2)
+    eAll    = eInsert | eUpdate | eDelete,
 };
 
 typedef EventKind EventKindList[3];

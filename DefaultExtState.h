@@ -11,66 +11,76 @@ class DefaultExtState: public ExtStateIface, protected State {
     std::mutex m_mutex;
 
 public:
-    virtual State getState()
+    State getState() override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         return *this;
     }
-    virtual void setConnecting()
+    void setConnecting() override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         connect_time = ::time(NULL);
         ++connect_count;
     }
-    virtual time_t getConnectTime()
+    time_t getConnectTime() override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         return connect_time;
     }
-    virtual void setLastFilteredUpdateTime()
+    void setLastFilteredUpdateTime() override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         last_filtered_update = ::time(NULL);
     }
-    virtual time_t getLastFilteredUpdateTime()
+    time_t getLastFilteredUpdateTime() override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         return last_filtered_update;
     }
-    virtual void setLastEventTimePos(time_t t, unsigned long pos)
+    void setLastEventTimePos(time_t t, unsigned long pos) override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         last_event_time = t; intransaction_pos = pos; last_update = ::time(NULL);
     }
-    virtual time_t getLastUpdateTime()
+    time_t getLastUpdateTime() override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         return last_update;
     }
-    virtual time_t getLastEventTime()
+    time_t getLastEventTime() override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         return last_event_time;
     }
-    virtual unsigned long getIntransactionPos()
+    unsigned long getIntransactionPos() override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         return intransaction_pos;
     }
-    virtual void setMasterPosition(const Position& pos)
+    void setMasterPosition(const Position& pos) override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         position = pos;
         intransaction_pos = pos.log_pos;
     }
-    virtual void saveMasterPosition() {}
-    virtual bool loadMasterPosition(Position& pos)
+    void saveMasterPosition() override {}
+
+private:
+    bool loadMasterPositionNoLock(Position& pos)
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        // we could use std::recursive_mutex instead,
+        // but wicked toungues say it is a bad design
         pos.clear();
         return false;
     }
-    virtual bool getMasterPosition(Position& pos)
+
+public:
+    bool loadMasterPosition(Position& pos) override
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return loadMasterPositionNoLock(pos);
+    }
+    bool getMasterPosition(Position& pos) override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (!position.empty())
@@ -80,25 +90,25 @@ public:
                 pos.log_pos = intransaction_pos;
             return true;
         }
-        return loadMasterPosition(pos);
+        return loadMasterPositionNoLock(pos);
     }
-    virtual unsigned int getConnectCount()
+    unsigned int getConnectCount() override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         return connect_count;
     }
-    virtual void setStateProcessing(bool _state)
+    void setStateProcessing(bool _state) override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         state_processing = _state;
     }
-    virtual bool getStateProcessing()
+    bool getStateProcessing() override
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         return state_processing;
     }
-    virtual void initTableCount(const std::string& t) {}
-    virtual void incTableCount(const std::string& t) {}
+    void initTableCount(const std::string& t) override {}
+    void incTableCount(const std::string& t) override {}
 };
 
 }// slave

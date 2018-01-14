@@ -121,18 +121,16 @@ namespace // anonymous
             std::mutex m_Mutex;
             std::condition_variable m_CondVariable;
 
-            TestExtState() : intransaction_pos(0) {}
-
-            virtual slave::State getState() { return slave::State(); }
-            virtual void setConnecting() {}
-            virtual time_t getConnectTime() { return 0; }
-            virtual void setLastFilteredUpdateTime() {}
-            virtual time_t getLastFilteredUpdateTime() { return 0; }
-            virtual void setLastEventTimePos(time_t t, unsigned long pos) { intransaction_pos = pos; }
-            virtual time_t getLastUpdateTime() { return 0; }
-            virtual time_t getLastEventTime() { return 0; }
-            virtual unsigned long getIntransactionPos() { return intransaction_pos; }
-            virtual void setMasterPosition(const slave::Position& pos)
+            slave::State getState() override { return slave::State(); }
+            void setConnecting() override {}
+            time_t getConnectTime() override { return 0; }
+            void setLastFilteredUpdateTime() override {}
+            time_t getLastFilteredUpdateTime() override { return 0; }
+            void setLastEventTimePos(time_t t, unsigned long pos) override { intransaction_pos = pos; }
+            time_t getLastUpdateTime() override { return 0; }
+            time_t getLastEventTime() override { return 0; }
+            unsigned long getIntransactionPos() override { return intransaction_pos; }
+            void setMasterPosition(const slave::Position& pos) override
             {
                 {
                     std::lock_guard<std::mutex> lock(m_Mutex);
@@ -141,9 +139,9 @@ namespace // anonymous
                 }
                 m_CondVariable.notify_one();
             }
-            virtual void saveMasterPosition() {}
-            virtual bool loadMasterPosition(slave::Position& pos) { pos.clear(); return false; }
-            virtual bool getMasterPosition(slave::Position& pos)
+            void saveMasterPosition() override {}
+            bool loadMasterPosition(slave::Position& pos) override { pos.clear(); return false; }
+            bool getMasterPosition(slave::Position& pos) override
             {
                 if (!position.empty())
                 {
@@ -154,15 +152,15 @@ namespace // anonymous
                 }
                 return loadMasterPosition(pos);
             }
-            virtual unsigned int getConnectCount() { return 0; }
-            virtual void setStateProcessing(bool _state) {}
-            virtual bool getStateProcessing() { return false; }
-            virtual void initTableCount(const std::string& t) {}
-            virtual void incTableCount(const std::string& t) {}
+            unsigned int getConnectCount() override { return 0; }
+            void setStateProcessing(bool _state) override {}
+            bool getStateProcessing() override { return false; }
+            void initTableCount(const std::string& t) override {}
+            void incTableCount(const std::string& t) override {}
 
         private:
             slave::Position position;
-            unsigned long   intransaction_pos;
+            unsigned long   intransaction_pos = 0;
         };
 
         class TestSlaveStat : public slave::EventStatIface
@@ -193,14 +191,14 @@ namespace // anonymous
             std::map<slave::EventKind, Counter>                           map_kind;
             std::map<std::pair<unsigned long, slave::EventKind>, Counter> map_detailed;
 
-            virtual void processTableMap(const unsigned long id, const std::string& table, const std::string& database)
+            void processTableMap(const unsigned long id, const std::string& table, const std::string& database) override
             {
                 const auto key = std::make_pair(database, table);
                 map_table[key] = id;
                 ++events_table_map;
             }
 
-            virtual void tick(time_t when)
+            void tick(time_t when) override
             {
                 ++events_total;
                 if (when != 0)
@@ -210,17 +208,17 @@ namespace // anonymous
                 }
             }
 
-            virtual void tickFormatDescription() { ++events_total; ++events_format_description; }
+            void tickFormatDescription() override { ++events_total; ++events_format_description; }
 
-            virtual void tickQuery() { ++events_query; }
+            void tickQuery() override { ++events_query; }
 
-            virtual void tickRotate() { ++events_total; ++events_rotate; }
+            void tickRotate() override { ++events_total; ++events_rotate; }
 
-            virtual void tickXid() { ++events_xid; }
+            void tickXid() override { ++events_xid; }
 
-            virtual void tickOther() { ++events_other; }
+            void tickOther() override { ++events_other; }
 
-            virtual void tickModifyEventIgnored(const unsigned long id, slave::EventKind kind)
+            void tickModifyEventIgnored(const unsigned long id, slave::EventKind kind) override
             {
                 ++events_modify;
 
@@ -229,7 +227,7 @@ namespace // anonymous
                 map_detailed[key].ignored += 1;
             }
 
-            virtual void tickModifyEventDone(const unsigned long id, slave::EventKind kind)
+            void tickModifyEventDone(const unsigned long id, slave::EventKind kind) override
             {
                 ++events_modify;
 
@@ -238,7 +236,7 @@ namespace // anonymous
                 map_detailed[key].done += 1;
             }
 
-            virtual void tickModifyEventFailed(const unsigned long id, slave::EventKind kind)
+            void tickModifyEventFailed(const unsigned long id, slave::EventKind kind) override
             {
                 ++events_modify;
 
@@ -247,7 +245,7 @@ namespace // anonymous
                 map_detailed[key].failed += 1;
             }
 
-            virtual void tickModifyRowDone(const unsigned long id, slave::EventKind kind, uint64_t time)
+            void tickModifyRowDone(const unsigned long id, slave::EventKind kind, uint64_t time) override
             {
                 ++rows_modify;
 
