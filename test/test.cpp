@@ -16,10 +16,7 @@ std::string print(const std::string& type, const slave::FieldValue& v) {
 
     if (v.type() == typeid(std::string)) {
 
-        std::string r = "'";
-        r += slave::get<std::string>(v);
-        r += "'";
-        return r;
+        return "'" +  slave::get<std::string>(v) + "'";
 
     } else {
         std::ostringstream s;
