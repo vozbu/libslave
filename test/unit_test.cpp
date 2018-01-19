@@ -379,8 +379,8 @@ namespace // anonymous
             m_Slave.setMasterInfo(sMasterInfo);
             m_Slave.linkEventStat(&m_SlaveStat);
             // Set callback into Fixture - and it will call callbacks which will be set in tests.
-            m_Slave.setCallback(cfg.mysql_db, "test", std::ref(m_Callback), filter);
-            m_Slave.setCallback(cfg.mysql_db, "stat", std::ref(m_Callback), filter);
+            m_Slave.setCallback(cfg.mysql_db, "test", std::ref(m_Callback), slave::RowType::Map, filter);
+            m_Slave.setCallback(cfg.mysql_db, "stat", std::ref(m_Callback), slave::RowType::Map, filter);
             m_Slave.init();
             startSlave();
         }
@@ -427,15 +427,7 @@ namespace // anonymous
                     str << "Row size is " << row.size();
                     throw std::runtime_error(str.str());
                 }
-#ifdef USE_VECTOR_FOR_ROW_STORAGE
-                if (row.size() == 1)
-                {
-                    if (slave::isNullFieldValue(row[0].second))
-                        return Row(true);
 
-                    return Row(slave::get<T>(row[0].second), false);
-                }
-#else
                 const slave::Row::const_iterator it = row.find("value");
                 if (row.end() != it)
                 {
@@ -445,7 +437,6 @@ namespace // anonymous
 
                     return Row(slave::get<T>(it->second.second), false);
                 }
-#endif
                 else
                 {
                     // there isn't info. about changes in field
@@ -1469,22 +1460,6 @@ namespace // anonymous
 
         void operator() (const slave::RecordSet& rs)
         {
-#ifdef USE_VECTOR_FOR_ROW_STORAGE
-            if (not rs.m_old_row.empty())
-            {
-                old_row_empty = false;
-                if (rs.m_old_row.size() == 2)
-                {
-                    id_old = slave::get<uint32_t>(rs.m_old_row[0].second);
-                    value_old = slave::get<uint32_t>(rs.m_old_row[1].second);
-                }
-            }
-            if (rs.m_row.size() == 2)
-            {
-                id = slave::get<uint32_t>(rs.m_row[0].second);
-                value = slave::get<uint32_t>(rs.m_row[1].second);
-            }
-#else
             if (not rs.m_old_row.empty())
             {
                 old_row_empty = false;
@@ -1503,7 +1478,6 @@ namespace // anonymous
             it = rs.m_row.find("value");
             if (it != rs.m_row.end())
                 value = slave::get<uint32_t>(it->second.second);
-#endif
         }
 
         void reset()

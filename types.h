@@ -87,6 +87,11 @@ namespace types
     }
 }// types
 
+enum class RowType {
+    Map,
+    Vector
+};
+
 #ifdef SLAVE_USE_VARIANT_FOR_FIELD_VALUE
     using FieldValue = boost::variant<std::nullptr_t
                                     , int

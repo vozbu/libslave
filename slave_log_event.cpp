@@ -407,9 +407,42 @@ size_t n_set_bits(const std::vector<unsigned char>& b, unsigned int count) {
     return ret;
 }
 
+template <typename T>
+void fill_row(const slave::Table& table, T& row, unsigned index, const slave::FieldValue& value);
 
+template <>
+void fill_row<slave::Row>(const slave::Table& table, slave::Row& row, unsigned index, const slave::FieldValue& value)
+{
+    const auto& field = table.fields[index];
+    if (table.column_filter.empty() || table.column_filter[index / 8] & (1 << (index & 7)))
+        row[field->getFieldName()] = std::make_pair(field->field_type, value);
+}
+
+template <>
+void fill_row<slave::RowVector>(const slave::Table& table, slave::RowVector& row, unsigned index, const slave::FieldValue& value)
+{
+    const auto& field = table.fields[index];
+    if (table.column_filter.empty())
+        row.emplace_back(field->field_type, value);
+    else if (table.column_filter[index / 8] & (1 << (index & 7)))
+        row[table.column_filter_fields[index]] = std::make_pair(field->field_type, value);
+}
+
+template <typename T>
+void reserve_row(const slave::Table& table, T& row) {}
+
+template <>
+void reserve_row<slave::RowVector>(const slave::Table& table, slave::RowVector& row)
+{
+    if (table.column_filter.empty())
+        row.reserve(table.fields.size());
+    else
+        row.resize(table.column_filter_count);
+}
+
+template <typename T>
 unsigned char* unpack_row(const slave::Table& table,
-                          slave::Row& _row,
+                          T& _row,
                           unsigned int colcnt,
                           unsigned char* row,
                           const std::vector<unsigned char>& cols)
@@ -436,13 +469,7 @@ unsigned char* unpack_row(const slave::Table& table,
     unsigned int null_mask = 1U;
     unsigned char null_bits = *null_ptr++;
 
-#ifdef USE_VECTOR_FOR_ROW_STORAGE
-    const bool all_fields = table.column_filter.empty();
-    if (all_fields)
-        _row.reserve(colcnt);
-    else
-        _row.resize(table.column_filter_count);
-#endif
+    reserve_row<T>(table, _row);
 
     for (unsigned i = 0; i < colcnt; i++)
     {
@@ -466,37 +493,16 @@ unsigned char* unpack_row(const slave::Table& table,
             LOG_TRACE(log, "field with NULL value found");
 
             // We don't unpack the field if it was NULL,
-            // and put empty boost::any value to slave::Row's map
+            // and put empty slave::FieldValue value to slave::Row's value
             // in order to indicate presence of NULL value.
 
-#ifdef USE_VECTOR_FOR_ROW_STORAGE
-            if (all_fields)
-                _row.emplace_back(field->field_type, nullFieldValue());
-            else if (table.column_filter[i / 8] & (1 << (i & 7)))
-                _row[table.column_filter_fields[i]] = std::make_pair(field->field_type, nullFieldValue());
-#else
-            if (table.column_filter.empty() || table.column_filter[i / 8] & (1 << (i & 7)))
-            {
-                _row[field->getFieldName()] = std::make_pair(field->field_type, nullFieldValue());
-            }
-#endif
+            fill_row<T>(table, _row, i, nullFieldValue());
         }
         else
         {
             // We unpack the field to some certain value if it was NOT NULL
-
             ptr = (unsigned char*)field->unpack((const char*)ptr);
-
-#ifdef USE_VECTOR_FOR_ROW_STORAGE
-            if (all_fields)
-                _row.emplace_back(field->field_type, field->field_data);
-            else if (table.column_filter[i / 8] & (1 << (i & 7)))
-                _row[table.column_filter_fields[i]] = std::make_pair(field->field_type, field->field_data);
-#else
-            if (table.column_filter.empty() || table.column_filter[i / 8] & (1 << (i & 7))) {
-                _row[field->getFieldName()] = std::make_pair(field->field_type, field->field_data);
-            }
-#endif
+            fill_row<T>(table, _row, i, field->field_data);
         }
 
         null_mask <<= 1;
@@ -517,12 +523,17 @@ unsigned char* do_writedelete_row(const slave::Table& table,
 
     slave::RecordSet _record_set;
 
-    unsigned char* t = unpack_row(table, _record_set.m_row, roi.m_width, row_start, roi.m_cols);
+    unsigned char* t = nullptr;
+    if (table.row_type == RowType::Map)
+        t = unpack_row(table, _record_set.m_row, roi.m_width, row_start, roi.m_cols);
+    else
+        t = unpack_row(table, _record_set.m_row_vec, roi.m_width, row_start, roi.m_cols);
 
     if (t == NULL) {
         return NULL;
     }
 
+    _record_set.row_type = table.row_type;
     _record_set.when = bei.when;
     _record_set.tbl_name = table.table_name;
     _record_set.db_name = table.database_name;
@@ -542,18 +553,26 @@ unsigned char* do_update_row(const slave::Table& table,
 
     slave::RecordSet _record_set;
 
-    unsigned char* t = unpack_row(table, _record_set.m_old_row, roi.m_width, row_start, roi.m_cols);
+    unsigned char* t = nullptr;
+    if (table.row_type == RowType::Map)
+        t = unpack_row(table, _record_set.m_old_row, roi.m_width, row_start, roi.m_cols);
+    else
+        t = unpack_row(table, _record_set.m_old_row_vec, roi.m_width, row_start, roi.m_cols);
 
     if (t == NULL) {
         return NULL;
     }
 
-    t = unpack_row(table, _record_set.m_row, roi.m_width, t, roi.m_cols_ai);
+    if (table.row_type == RowType::Map)
+        t = unpack_row(table, _record_set.m_row, roi.m_width, t, roi.m_cols_ai);
+    else
+        t = unpack_row(table, _record_set.m_row_vec, roi.m_width, t, roi.m_cols_ai);
 
     if (t == NULL) {
         return NULL;
     }
 
+    _record_set.row_type = table.row_type;
     _record_set.when = bei.when;
     _record_set.tbl_name = table.table_name;
     _record_set.db_name = table.database_name;

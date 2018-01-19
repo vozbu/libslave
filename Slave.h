@@ -53,6 +53,7 @@ public:
 
     typedef std::vector<std::string> cols_t;
     typedef std::map<std::pair<std::string, std::string>, cols_t> column_filters_t;
+    typedef std::map<std::pair<std::string, std::string>, RowType> row_types_t;
 
 private:
     static inline bool falseFunction() { return false; };
@@ -72,6 +73,7 @@ private:
     callbacks_t m_callbacks;
     filters_t m_filters;
     column_filters_t m_column_filters;
+    row_types_t m_row_types;
 
     typedef std::function<void (unsigned int)> xid_callback_t;
     xid_callback_t m_xid_callback;
@@ -107,20 +109,21 @@ public:
     Position getLastBinlogPos() const;
 
     void setCallback(const std::string& _db_name, const std::string& _tbl_name, callback _callback,
-                     const cols_t &column_filter, EventKind filter = eAll)
+                     const cols_t& column_filter, RowType row_type = RowType::Map, EventKind filter = eAll)
     {
-        setCallback(_db_name, _tbl_name, _callback, filter);
+        setCallback(_db_name, _tbl_name, _callback, row_type, filter);
         m_column_filters[std::make_pair(_db_name, _tbl_name)] = column_filter;
     }
 
     void setCallback(const std::string& _db_name, const std::string& _tbl_name, callback _callback,
-                     EventKind filter = eAll)
+                     RowType row_type = RowType::Map, EventKind filter = eAll)
     {
         const std::pair<std::string, std::string> key = std::make_pair(_db_name, _tbl_name);
         m_table_order.insert(key);
         m_callbacks[key] = _callback;
         m_filters[key] = filter;
         m_column_filters[key] = cols_t();
+        m_row_types[key] = row_type;
 
         ext_state.initTableCount(_db_name + "." + _tbl_name);
     }
@@ -142,6 +145,7 @@ public:
             i->second->m_callback = m_callbacks[i->first];
             i->second->m_filter = m_filters[i->first];
             i->second->set_column_filter(m_column_filters[i->first]);
+            i->second->row_type = m_row_types[i->first];
         }
     }
 
