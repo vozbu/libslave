@@ -80,9 +80,13 @@ int bin2dec(const char *from, decimal_t *to, int precision, int scale)
     dec1 *buf=to->buf, mask=(*from & 0x80) ? 0 : -1;
     const char *stop;
     char *d_copy;
-    int bin_size= decimal_bin_size(precision, scale);
+    const size_t bin_size= decimal_bin_size(precision, scale);
 
     //sanity(to);
+    // make -Walloca-larger-than happy
+    if (bin_size > 128)
+        goto err;
+
     d_copy= (char*) my_alloca(bin_size);
     memcpy(d_copy, from, bin_size);
     d_copy[0]^= 0x80;
