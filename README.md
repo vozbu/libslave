@@ -1,4 +1,4 @@
-
+[![Build status](https://travis-ci.org/vozbu/libslave.svg)](https://travis-ci.org/vozbu/libslave)
 
 ABOUT
 ===================================================================

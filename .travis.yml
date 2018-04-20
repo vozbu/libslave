@@ -1,0 +1,45 @@
+language: cpp
+
+addons:
+    apt:
+        sources: &default_sources
+            - boost-latest
+        packages: &default_packages
+            - libboost1.55-all-dev
+
+matrix:
+  include:
+    - os: linux
+      addons:
+        apt:
+          sources:
+            - *default_sources
+            - ubuntu-toolchain-r-test
+          packages:
+            - *default_packages
+            - g++-7
+      env:
+        - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+
+    - os: linux
+      addons:
+        apt:
+          sources:
+            - *default_sources
+            - llvm-toolchain-trusty-5.0
+          packages:
+            - *default_packages
+            - clang-5.0
+      env:
+        - MATRIX_EVAL="CC=clang-5.0 && CXX=clang++-5.0"
+
+before_install:
+    - eval "${MATRIX_EVAL}"
+
+before_script:
+    - mkdir build
+    - cd build
+    - cmake .. -DCMAKE_BUILD_TYPE=Release
+
+script:
+    - make
