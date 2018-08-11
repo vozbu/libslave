@@ -54,7 +54,8 @@ Usage requirements
 Compiling
 -------------------------------------------------------------------
 
-Create directory "build" in source tree, step into it and run "cmake ..".
+Create directory "build" in source tree, step into it and run
+"cmake .. -DCMAKE_BUILD_TYPE=Release".
 Then, if configure step is complete, run "make".
 
 Review and edit Logging.h and SlaveStats.h to interface the library to
