@@ -10,6 +10,7 @@ using namespace boost::unit_test;
 #include <cfloat>
 #include <cmath>
 #include <condition_variable>
+#include <cstddef>  // for std::nullptr_t
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -19,6 +20,14 @@ using namespace boost::unit_test;
 #include "Slave.h"
 #include "nanomysql.h"
 #include "types.h"
+
+namespace std
+{
+    inline std::ostream& operator << (std::ostream& os, std::nullptr_t n)
+    {
+        return os << "nullptr";
+    }
+}// std
 
 namespace // anonymous
 {
