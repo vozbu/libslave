@@ -441,7 +441,7 @@ unsigned char* unpack_row(std::shared_ptr<slave::Table> table,
 
         slave::PtrField field = table->fields[i];
 
-        if (!(cols[i / 8] & (1 << (i & 7)))) {
+        if (!cols.empty() && !(cols[i / 8] & (1 << (i & 7)))) {
 
             LOG_TRACE(log, "field " << field->getFieldName() << " is not in column list.");
             continue;
