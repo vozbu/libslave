@@ -67,26 +67,41 @@ void callback(const slave::RecordSet& event) {
 
     std::cout << " " << event.db_name << "." << event.tbl_name << "\n";
 
-    for (slave::Row::const_iterator i = event.m_row.begin(); i != event.m_row.end(); ++i) {
-
-        std::string value = print(i->second.second);
-
-        std::cout << "  " << i->first << " : " << i->second.first << " -> " << value;
-
-        if (event.type_event == slave::RecordSet::Update) {
-
-            slave::Row::const_iterator j = event.m_old_row.find(i->first);
-
-            std::string old_value("NULL");
-
-            if (j != event.m_old_row.end())
-                old_value = print(j->second.second);
-
-            if (value != old_value)
-                std::cout << "    (was: " << old_value << ")";
+    if (event.row_type == slave::RowType::Map)
+    {
+        for (const auto& i : event.m_row)
+        {
+            const auto value = print(i.second.second);
+            std::cout << "  " << i.first << " : " << i.second.first << " -> " << value;
+            if (event.type_event == slave::RecordSet::Update)
+            {
+                const auto j = event.m_old_row.find(i.first);
+                std::string old_value("NULL");
+                if (j != event.m_old_row.end())
+                    old_value = print(j->second.second);
+                if (value != old_value)
+                    std::cout << "    (was: " << old_value << ")";
+            }
+            std::cout << "\n";
         }
-
-        std::cout << "\n";
+    }
+    else
+    {
+        for (auto it = event.m_row_vec.begin(); it != event.m_row_vec.end(); ++it)
+        {
+            const auto value = print(it->second);
+            const unsigned index = it - event.m_row_vec.begin();
+            std::cout << "  " << "field#" << index << " -> " << value;
+            if (event.type_event == slave::RecordSet::Update)
+            {
+                std::string old_value("NULL");
+                if (index < event.m_old_row_vec.size())
+                    old_value = print(event.m_old_row_vec[index].second);
+                if (value != old_value)
+                    std::cout << "    (was: " << old_value << ")";
+            }
+            std::cout << "\n";
+        }
     }
 
     std::cout << "  @ts = "  << event.when << "\n"

@@ -379,8 +379,8 @@ namespace // anonymous
             m_Slave.setMasterInfo(sMasterInfo);
             m_Slave.linkEventStat(&m_SlaveStat);
             // Set callback into Fixture - and it will call callbacks which will be set in tests.
-            m_Slave.setCallback(cfg.mysql_db, "test", std::ref(m_Callback), filter);
-            m_Slave.setCallback(cfg.mysql_db, "stat", std::ref(m_Callback), filter);
+            m_Slave.setCallback(cfg.mysql_db, "test", std::ref(m_Callback), slave::RowType::Map, filter);
+            m_Slave.setCallback(cfg.mysql_db, "stat", std::ref(m_Callback), slave::RowType::Map, filter);
             m_Slave.init();
             startSlave();
         }
@@ -427,6 +427,7 @@ namespace // anonymous
                     str << "Row size is " << row.size();
                     throw std::runtime_error(str.str());
                 }
+
                 const slave::Row::const_iterator it = row.find("value");
                 if (row.end() != it)
                 {

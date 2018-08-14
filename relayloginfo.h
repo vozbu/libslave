@@ -26,7 +26,7 @@
 namespace slave {
 
 
-typedef std::shared_ptr<Table> PtrTable;
+typedef std::unique_ptr<Table> PtrTable;
 
 class RelayLogInfo {
 
@@ -60,21 +60,20 @@ public:
         }
     }
 
-    std::shared_ptr<Table> getTable(const std::pair<std::string, std::string>& key) const
+    const PtrTable& getTable(const std::pair<std::string, std::string>& key) const
     {
+        static const PtrTable empty;
         name_to_table_t::const_iterator p = m_table_map.find(key);
 
-        if (p != m_table_map.end()) {
+        if (p != m_table_map.end())
             return p->second;
 
-        } else {
-            return std::shared_ptr<Table>();
-        }
+        return empty;
     }
 
-    void setTable(const std::string& table_name, const std::string& db_name, PtrTable table) {
-
-        m_table_map[std::make_pair(db_name, table_name)] = table;
+    void setTable(const std::string& table_name, const std::string& db_name, PtrTable&& table)
+    {
+        m_table_map[std::make_pair(db_name, table_name)] = std::move(table);
     }
 
 };

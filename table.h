@@ -30,7 +30,7 @@
 namespace slave
 {
 
-typedef std::shared_ptr<Field> PtrField;
+typedef std::unique_ptr<Field> PtrField;
 typedef std::function<void (RecordSet&)> callback;
 typedef EventKind filter;
 
@@ -43,12 +43,15 @@ public:
 
     std::vector<PtrField> fields;
     std::vector<unsigned char> column_filter;
+    std::vector<unsigned> column_filter_fields;
+    unsigned column_filter_count;
+    RowType  row_type;
 
     callback m_callback;
     EventKind m_filter;
 
-    void call_callback(slave::RecordSet& _rs, ExtStateIface &ext_state) {
-
+    void call_callback(slave::RecordSet& _rs, ExtStateIface &ext_state) const
+    {
         // Some stats
         ext_state.incTableCount(full_name);
         ext_state.setLastFilteredUpdateTime();
@@ -59,12 +62,17 @@ public:
     void set_column_filter(const std::vector<std::string> &_column_filter) {
         if (_column_filter.empty()) {
             column_filter.clear();
+            column_filter_fields.clear();
+            column_filter_count = 0;
             return;
         }
 
         column_filter.resize((fields.size() + 7)/8);
+        column_filter_fields.resize(fields.size());
+        column_filter_count = _column_filter.size();
         for (unsigned i = 0; i < column_filter.size(); i++) {
             column_filter[i] = 0;
+            column_filter_fields[i] = 0;
         }
 
         // FIXME: this loop has complexity factor of O(N*M)
@@ -75,6 +83,7 @@ public:
                 if (field->getFieldName() == field_name) {
                     const int index = j - fields.begin();
                     column_filter[index>>3] |= (1<<(index&7));
+                    column_filter_fields[index] = i - _column_filter.begin();
                     break;
                 }
             }
@@ -87,6 +96,7 @@ public:
     std::string full_name;
 
     Table(const std::string& db_name, const std::string& tbl_name) :
+        column_filter_count(0),
         table_name(tbl_name), database_name(db_name),
         full_name(database_name + "." + table_name)
         {}

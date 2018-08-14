@@ -26,6 +26,8 @@ a table in callback.
 * Distinguish between absense of field and NULL field.
 * Optional use `boost::variant` instead of `boost::any` for field
 value storing.
+* Store field values in `vector` by indexes instead of `std::map`
+by names. Must be used in conjunction with column filter.
 
 USAGE
 ===================================================================
