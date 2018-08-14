@@ -23,6 +23,7 @@ Features
   * GTID or log name and position positioning
 * Column filter - you can receive only desired subset of fields from
 a table in callback.
+* Distinguish between absense of field and NULL field.
 
 USAGE
 ===================================================================
