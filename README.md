@@ -24,6 +24,8 @@ Features
 * Column filter - you can receive only desired subset of fields from
 a table in callback.
 * Distinguish between absense of field and NULL field.
+* Optional use `boost::variant` instead of `boost::any` for field
+value storing.
 
 USAGE
 ===================================================================
