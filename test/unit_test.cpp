@@ -431,10 +431,10 @@ namespace // anonymous
                 if (row.end() != it)
                 {
                     // field has NULL value
-                    if (it->second.second.empty())
+                    if (slave::isNullFieldValue(it->second.second))
                         return Row(true);
 
-                    return Row(boost::any_cast<T>(it->second.second), false);
+                    return Row(slave::get<T>(it->second.second), false);
                 }
                 else
                 {
@@ -1163,8 +1163,8 @@ namespace // anonymous
                 {
                     BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].done,    0);
                     BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].done, 0);
-                    BOOST_CHECK_GT(   f.m_SlaveStat.map_kind[kind].row_done,    0);
-                    BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[key].row_done, 0);
+                    BOOST_CHECK_GE(   f.m_SlaveStat.map_kind[kind].row_done,    0);
+                    BOOST_CHECK_GE(   f.m_SlaveStat.map_detailed[key].row_done, 0);
                 }
                 else
                 {
@@ -1344,7 +1344,7 @@ namespace // anonymous
             if (kind == slave::eInsert)
             {
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
+                BOOST_CHECK_GE(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
             else
             {
@@ -1374,7 +1374,7 @@ namespace // anonymous
             if (kind == slave::eInsert)
             {
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyStat].done,     1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
+                BOOST_CHECK_GE(   f.m_SlaveStat.map_detailed[sKeyStat].row_done, 0);
             }
             else
             {
@@ -1393,7 +1393,7 @@ namespace // anonymous
             else
             {
                 BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].done,     1);
-                BOOST_CHECK_GT(   f.m_SlaveStat.map_detailed[sKeyTest].row_done, 0);
+                BOOST_CHECK_GE(   f.m_SlaveStat.map_detailed[sKeyTest].row_done, 0);
             }
 
             BOOST_CHECK_EQUAL(f.m_SlaveStat.map_detailed[sKeyTest].ignored, 0);
@@ -1464,19 +1464,19 @@ namespace // anonymous
                 old_row_empty = false;
                 auto it = rs.m_old_row.find("id");
                 if (it != rs.m_old_row.end())
-                    id_old = boost::any_cast<uint32_t>(it->second.second);
+                    id_old = slave::get<uint32_t>(it->second.second);
 
                 it = rs.m_old_row.find("value");
                 if (it != rs.m_old_row.end())
-                    value_old = boost::any_cast<uint32_t>(it->second.second);
+                    value_old = slave::get<uint32_t>(it->second.second);
             }
             auto it = rs.m_row.find("id");
             if (it != rs.m_row.end())
-                id = boost::any_cast<uint32_t>(it->second.second);
+                id = slave::get<uint32_t>(it->second.second);
 
             it = rs.m_row.find("value");
             if (it != rs.m_row.end())
-                value = boost::any_cast<uint32_t>(it->second.second);
+                value = slave::get<uint32_t>(it->second.second);
         }
 
         void reset()

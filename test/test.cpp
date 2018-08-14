@@ -12,44 +12,44 @@
 volatile sig_atomic_t stop = 0;
 slave::Slave* sl = NULL;
 
-std::string print(const std::string& type, const boost::any& v) {
+std::string print(const std::string& type, const slave::FieldValue& v) {
 
     if (v.type() == typeid(std::string)) {
 
         std::string r = "'";
-        r += boost::any_cast<std::string>(v);
+        r += slave::get<std::string>(v);
         r += "'";
         return r;
 
     } else {
         std::ostringstream s;
 
-        if (v.empty() || v.type() == typeid(std::nullptr_t))
+        if (slave::isNullFieldValue(v))
             s << "NULL";
 
         else if (v.type() == typeid(int))
-            s << boost::any_cast<int>(v);
+            s << slave::get<int>(v);
 
         else if (v.type() == typeid(unsigned int))
-            s << boost::any_cast<unsigned int>(v);
+            s << slave::get<unsigned int>(v);
 
         else if (v.type() == typeid(char))
-            s << boost::any_cast<char>(v);
+            s << slave::get<char>(v);
 
         else if (v.type() == typeid(float))
-            s << boost::any_cast<float>(v);
+            s << slave::get<float>(v);
 
         else if (v.type() == typeid(double))
-            s << boost::any_cast<double>(v);
+            s << slave::get<double>(v);
 
         else if (v.type() == typeid(unsigned long long))
-            s << boost::any_cast<unsigned long long>(v);
+            s << slave::get<unsigned long long>(v);
 
         else if (v.type() == typeid(void))
             s << "void";
 
         else
-            s << boost::any_cast<long>(v);
+            s << "unknown type";
 
         return s.str();
     }
