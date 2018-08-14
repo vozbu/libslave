@@ -21,6 +21,8 @@ Features
   * binlog_checksum=(NONE,CRC32)
   * binlog_row_image=(full,minimal)
   * GTID or log name and position positioning
+* Column filter - you can receive only desired subset of fields from
+a table in callback.
 
 USAGE
 ===================================================================
