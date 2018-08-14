@@ -3,6 +3,7 @@
 #include <iostream>
 #include <sstream>
 #include <signal.h>
+#include <cstddef>  // for std::nullptr_t
 
 #include "Slave.h"
 #include "DefaultExtState.h"
@@ -23,11 +24,20 @@ std::string print(const std::string& type, const boost::any& v) {
     } else {
         std::ostringstream s;
 
-        if (v.type() == typeid(int))
+        if (v.empty() || v.type() == typeid(std::nullptr_t))
+            s << "NULL";
+
+        else if (v.type() == typeid(int))
             s << boost::any_cast<int>(v);
 
         else if (v.type() == typeid(unsigned int))
             s << boost::any_cast<unsigned int>(v);
+
+        else if (v.type() == typeid(char))
+            s << boost::any_cast<char>(v);
+
+        else if (v.type() == typeid(float))
+            s << boost::any_cast<float>(v);
 
         else if (v.type() == typeid(double))
             s << boost::any_cast<double>(v);

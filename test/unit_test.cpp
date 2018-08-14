@@ -10,6 +10,7 @@ using namespace boost::unit_test;
 #include <cfloat>
 #include <cmath>
 #include <condition_variable>
+#include <cstddef>  // for std::nullptr_t
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -19,6 +20,14 @@ using namespace boost::unit_test;
 #include "Slave.h"
 #include "nanomysql.h"
 #include "types.h"
+
+namespace std
+{
+    inline std::ostream& operator << (std::ostream& os, std::nullptr_t n)
+    {
+        return os << "nullptr";
+    }
+}// std
 
 namespace // anonymous
 {
@@ -390,10 +399,22 @@ namespace // anonymous
         }
 
         template<typename T>
+        struct RowValue
+        {
+            boost::optional<T> value;
+            bool isNull; // true if libslave get NULL value from binlog
+
+            RowValue(const T& value_, bool isNull_) :
+                value(value_), isNull(isNull_) {}
+
+            RowValue(bool isNull_) : isNull(isNull_) {}
+        };
+
+        template<typename T>
         struct Collector
         {
-            typedef slave::RecordSet::TypeEvent TypeEvent;
-            typedef boost::optional<T> Row;
+            typedef slave::RecordSet::TypeEvent     TypeEvent;
+            typedef RowValue<T>                     Row;
             typedef std::tuple<TypeEvent, Row, Row> Event;
             typedef std::vector<Event> EventVector;
             EventVector data;
@@ -408,9 +429,18 @@ namespace // anonymous
                 }
                 const slave::Row::const_iterator it = row.find("value");
                 if (row.end() != it)
-                    return boost::any_cast<T>(it->second.second);
+                {
+                    // field has NULL value
+                    if (it->second.second.empty())
+                        return Row(true);
+
+                    return Row(boost::any_cast<T>(it->second.second), false);
+                }
                 else
-                    return Row();
+                {
+                    // there isn't info. about changes in field
+                    return Row(false);
+                }
             }
 
             void operator()(const slave::RecordSet& rs)
@@ -421,18 +451,27 @@ namespace // anonymous
             static void expectNothing(const Row& row, const std::string& name,
                                       const std::string& aErrorMessage)
             {
-                if (row)
-                    BOOST_ERROR("Has " << name << " image with '" << row.get()
+                if (row.value || row.isNull)
+                    BOOST_ERROR("Has " << name << " image with '" << row.value.get()
                                 << "' value, expected nothing during" << aErrorMessage);
             }
 
             static void expectValue(const T& value, const Row& row, const std::string& name,
                                     const std::string& aErrorMessage)
             {
-                if (!row)
+                if (!row.isNull && !row.value)
                     BOOST_ERROR("Has not " << name << " image, expected '" << value << "' during" << aErrorMessage);
-                if (not_equal(row.get(), value))
-                    BOOST_ERROR("Has invalid " << name << " image with '" << row.get() << "'"
+
+                if (typeid(std::nullptr_t) == typeid(T))
+                {
+                    if (!row.isNull)
+                        BOOST_ERROR("Has invalid " << name << " image, "
+                                                   << "expected 'NULL' during " << aErrorMessage);
+                    return;
+                }
+
+                if (not_equal(row.value.get(), value))
+                    BOOST_ERROR("Has invalid " << name << " image with '" << row.value.get() << "'"
                                 << "while expected '"<< value << "' during " << aErrorMessage);
             }
 
@@ -1511,6 +1550,14 @@ namespace // anonymous
             BOOST_ERROR("Unwanted calls before this case: " << f.m_Callback.m_UnwantedCalls);
     }
 
+    void test_InsertNullValue()
+    {
+        Fixture f;
+        f.conn->query("DROP TABLE IF EXISTS test");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+        f.checkInsertValue(nullptr, "NULL", "");
+    }
+
     void test_AlterCreateTable()
     {
         Fixture f;
@@ -1648,6 +1695,7 @@ test_suite* init_unit_test_suite(int argc, char* argv[])
     ADD_FIXTURE_TEST(test_Disconnect);
     ADD_FIXTURE_TEST(test_Stat);
     ADD_FIXTURE_TEST(test_BinlogRowImageOption);
+    ADD_FIXTURE_TEST(test_InsertNullValue);
     ADD_FIXTURE_TEST(test_AlterCreateTable);
     ADD_FIXTURE_TEST(test_GtidParsing);
     ADD_FIXTURE_TEST(test_GtidAdding);

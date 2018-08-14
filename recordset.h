@@ -34,10 +34,10 @@ struct RecordSet
 
     time_t when;
 
-    enum TypeEvent { Update, Delete, Write, PreInit, PostInit };
+    enum TypeEvent { Update, Delete, Write };
 
     TypeEvent type_event;
-	 
+
     // Root master ID from which this record originated
     unsigned int master_id;
     RecordSet(): master_id(0) {}
