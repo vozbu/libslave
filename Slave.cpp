@@ -377,7 +377,7 @@ struct raii_mysql_connector
         std::lock_guard<std::mutex> l(mutex);
         thread_id = ::pthread_self();
 
-        if (!(mysql_init(mysql))) {
+        if (!(mysql_guard::mysql_safe_init(mysql))) {
 
             throw std::runtime_error("Slave::reconnect() : mysql_init() : could not initialize mysql structure");
         }
@@ -386,7 +386,8 @@ struct raii_mysql_connector
         const auto& sConnOptions = m_master_info.conn_options;
         nanomysql::Connection::setOptions(mysql, sConnOptions);
 
-        while (mysql_real_connect(mysql,
+        using mysql_guard::mysql_safe_connect;
+        while (mysql_safe_connect(mysql,
                                   sConnOptions.mysql_host.c_str(),
                                   sConnOptions.mysql_user.c_str(),
                                   sConnOptions.mysql_pass.c_str(), 0, sConnOptions.mysql_port, 0, CLIENT_REMEMBER_OPTIONS)
