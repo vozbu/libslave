@@ -419,7 +419,6 @@ struct raii_mysql_connector
     {
         std::lock_guard<std::mutex> l(mutex);
         thread_id = 0;
-        end_server(mysql);
         mysql_close(mysql);
     }
 };
