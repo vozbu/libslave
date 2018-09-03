@@ -16,6 +16,7 @@
 #define __NANOMYSQL_H
 
 #include <mysql/mysql.h>
+#include "MysqlGuard.h"
 #include "nanofield.h"
 #include <stdexcept>
 #include <stdio.h>
@@ -70,20 +71,20 @@ class Connection {
 
     void connect(const mysql_conn_opts& opts)
     {
-        m_conn = ::mysql_init(NULL);
+        m_conn = mysql_guard::mysql_safe_init(NULL);
 
         if (!m_conn)
             throw std::runtime_error("Could not mysql_init()");
 
         setOptions(m_conn, opts);
 
-        if (::mysql_real_connect(m_conn
-                               , opts.mysql_host.c_str()
-                               , opts.mysql_user.c_str()
-                               , opts.mysql_pass.c_str()
-                               , opts.mysql_db.c_str()
-                               , opts.mysql_port, NULL, 0
-                                ) == NULL)
+        if (mysql_guard::mysql_safe_connect(m_conn
+                                          , opts.mysql_host.c_str()
+                                          , opts.mysql_user.c_str()
+                                          , opts.mysql_pass.c_str()
+                                          , opts.mysql_db.c_str()
+                                          , opts.mysql_port, NULL, 0
+                                           ) == NULL)
         {
             throw_error("Could not mysql_real_connect()");
         }
