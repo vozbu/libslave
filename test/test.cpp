@@ -27,20 +27,23 @@ std::string print(const slave::FieldValue& v) {
         else if (v.type() == typeid(int))
             s << slave::get<int>(v);
 
-        else if (v.type() == typeid(unsigned int))
-            s << slave::get<unsigned int>(v);
-
         else if (v.type() == typeid(char))
             s << slave::get<char>(v);
+
+        else if (v.type() == typeid(int32_t))
+            s << slave::get<int32_t>(v);
+
+        else if (v.type() == typeid(uint32_t))
+            s << slave::get<uint32_t>(v);
+
+        else if (v.type() == typeid(unsigned long long))
+            s << slave::get<unsigned long long>(v);
 
         else if (v.type() == typeid(float))
             s << slave::get<float>(v);
 
         else if (v.type() == typeid(double))
             s << slave::get<double>(v);
-
-        else if (v.type() == typeid(unsigned long long))
-            s << slave::get<unsigned long long>(v);
 
         else if (v.type() == typeid(void))
             s << "void";

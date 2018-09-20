@@ -28,6 +28,7 @@ namespace types
     typedef uint64_t            MY_BIT;
     typedef int                 MY_ENUM;
     typedef unsigned long long  MY_SET;
+    typedef float               MY_FLOAT;
     typedef double              MY_DOUBLE;
     typedef double              MY_DECIMAL;
     typedef uint32_t            MY_DATE;
@@ -38,6 +39,8 @@ namespace types
     typedef std::string         MY_VARCHAR;
     typedef std::string         MY_TINYTEXT;
     typedef std::string         MY_TEXT;
+    typedef std::string         MY_MEDIUMTEXT;
+    typedef std::string         MY_LONGTEXT;
     typedef std::string         MY_BLOB;
 
     // NOTE you should call tzset directly or indirectly before using any of these functions
