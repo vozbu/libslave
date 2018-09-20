@@ -1,0 +1,17 @@
+define, TINYINT NOT NULL
+data, 0, 0
+data, 1, 1
+data, -1, -1
+data, 10, 10
+data, 100, 100
+data, 127, 127
+
+define, TINYINT(2) NOT NULL
+data, 0, 0
+data, 1, 1
+data, 99, 99
+data, 100, 100
+
+define, TINYINT UNSIGNED NOT NULL
+data, 0, 0
+data, 1, 1

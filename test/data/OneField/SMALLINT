@@ -1,0 +1,18 @@
+define, SMALLINT NOT NULL
+data, 0, 0
+data, 1, 1
+data, -1, -1
+data, 10, 10
+data, 100, 100
+data, 1000, 1000
+data, 32767, 32767
+
+define, SMALLINT(2) NOT NULL
+data, 0, 0
+data, 1, 1
+data, 99, 99
+data, 100, 100
+
+define, SMALLINT UNSIGNED NOT NULL
+data, 0, 0
+data, 1, 1

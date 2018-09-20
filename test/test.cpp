@@ -30,6 +30,9 @@ std::string print(const slave::FieldValue& v) {
         else if (v.type() == typeid(char))
             s << slave::get<char>(v);
 
+        else if (v.type() == typeid(uint16_t))
+            s << slave::get<uint16_t>(v);
+
         else if (v.type() == typeid(int32_t))
             s << slave::get<int32_t>(v);
 

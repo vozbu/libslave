@@ -865,6 +865,7 @@ namespace // anonymous
     enum MYSQL_TYPE
     {
         MYSQL_TINYINT,
+        MYSQL_SMALLINT,
         MYSQL_INT,
         MYSQL_BIGINT,
         MYSQL_CHAR,
@@ -883,6 +884,22 @@ namespace // anonymous
 
     template <MYSQL_TYPE T>
     struct MYSQL_type_traits;
+
+    template<>
+    struct MYSQL_type_traits<MYSQL_TINYINT>
+    {
+        typedef slave::types::MY_TINYINT slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_TINYINT>::name = "TINYINT";
+
+    template<>
+    struct MYSQL_type_traits<MYSQL_SMALLINT>
+    {
+        typedef slave::types::MY_SMALLINT slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_SMALLINT>::name = "SMALLINT";
 
     template <>
     struct MYSQL_type_traits<MYSQL_INT>
@@ -1099,6 +1116,8 @@ namespace // anonymous
     void testOneFilterAllTypes(slave::EventKind filter)
     {
         Fixture f(filter);
+        testOneType<boost::mpl::int_<MYSQL_TINYINT>>(f);
+        testOneType<boost::mpl::int_<MYSQL_SMALLINT>>(f);
         testOneType<boost::mpl::int_<MYSQL_INT>>(f);
         testOneType<boost::mpl::int_<MYSQL_BIGINT>>(f);
         testOneType<boost::mpl::int_<MYSQL_CHAR>>(f);

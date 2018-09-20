@@ -99,6 +99,7 @@ enum class RowType {
     using FieldValue = boost::variant<std::nullptr_t
                                     , int
                                     , char
+                                    , uint16_t
                                     , int32_t
                                     , uint32_t
                                     , unsigned long long
