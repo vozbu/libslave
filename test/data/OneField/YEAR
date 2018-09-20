@@ -1,5 +1,5 @@
 define, YEAR NOT NULL
-data, "2006", j
-data, "1950", 2
-data, 2016, t
-data, "2025", }
+data, "2006", 106
+data, "1950", 50
+data, 2016, 116
+data, "2025", 125

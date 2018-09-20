@@ -1011,6 +1011,16 @@ namespace // anonymous
         t.erase(0, 1);
     }
 
+    void getValue(const std::string& s, slave::types::MY_TINYINT& t)
+    {
+        std::istringstream is;
+        is.str(s);
+        // читаем как число
+        uint16_t tmp;
+        is >> tmp;
+        t = static_cast<slave::types::MY_TINYINT>(tmp);
+    }
+
     template<typename T>
     void testOneType(Fixture& fixture)
     {
