@@ -26,12 +26,13 @@ matrix:
         apt:
           sources:
             - *default_sources
-            - llvm-toolchain-trusty-5.0
+            - llvm-toolchain-trusty-6.0
           packages:
             - *default_packages
-            - clang-5.0
+            - libllvm6.0 llvm-6.0 llvm-6.0-dev llvm-6.0-runtime
+            - clang-6.0 clang-tools-6.0 libclang-common-6.0-dev libclang-6.0-dev libclang1-6.0
       env:
-        - MATRIX_EVAL="CC=clang-5.0 && CXX=clang++-5.0"
+        - MATRIX_EVAL="CC=clang-6.0 && CXX=clang++-6.0"
 
 before_install:
     - eval "${MATRIX_EVAL}"
