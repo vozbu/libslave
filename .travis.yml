@@ -17,9 +17,9 @@ matrix:
             - ubuntu-toolchain-r-test
           packages:
             - *default_packages
-            - g++-7
+            - g++-8
       env:
-        - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+        - MATRIX_EVAL="CC=gcc-8 && CXX=g++-8"
 
     - os: linux
       addons:
