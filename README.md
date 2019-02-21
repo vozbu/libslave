@@ -57,6 +57,7 @@ Usage requirements
 -------------------------------------------------------------------
  * Requires >= Mysql 5.1.23 and <= Mysql 5.7.12. Tested with some of the 5.1, 5.5, 5.6, 5.7
    versions of mysql servers.
+ * Requires rights `REPLICATION SLAVE` and `REPLICATION CLIENT`, and `SELECT` for tables being used.
 
 Compiling
 -------------------------------------------------------------------
