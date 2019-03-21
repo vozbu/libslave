@@ -2,6 +2,7 @@ CMAKE_MINIMUM_REQUIRED (VERSION 3.1.3)
 PROJECT (libslave)
 
 OPTION (BUILD_STATIC "Force building static library" OFF)
+OPTION (WITH_TESTING "Enable building the tests framework" ON)
 
 # Build flags
 SET (CMAKE_CXX_STANDARD 11)
@@ -28,6 +29,7 @@ FIND_LIBRARY (LMYSQLCLIENT NAMES mysqlclient_r
                            PATH_SUFFIXES mysql)
 SET (Mysql_FIND_REQUIRED YES)
 FIND_PACKAGE_HANDLE_STANDARD_ARGS(Mysql DEFAULT_MSG IMYSQL LMYSQLCLIENT)
+INCLUDE_DIRECTORIES ("${IMYSQL}")
 INCLUDE_DIRECTORIES ("${IMYSQL}/mysql")
 
 # Check whether we've found static or dynamic library
@@ -50,14 +52,16 @@ MESSAGE (STATUS "Build ${LINK_TYPE} slave library")
 
 FILE (GLOB HDR "*.h")
 INSTALL (FILES ${HDR} DESTINATION include)
-AUX_SOURCE_DIRECTORY (${CMAKE_SOURCE_DIR} SRC)
+AUX_SOURCE_DIRECTORY (${CMAKE_CURRENT_SOURCE_DIR} SRC)
 
 # Most probably static mysql is built without fPIC, so, we can't build dynamic library with it
 ADD_LIBRARY (slave ${LINK_TYPE} ${SRC})
 TARGET_LINK_LIBRARIES (slave ${MYSQL_LIBS} -lpthread)
 INSTALL (TARGETS slave DESTINATION lib64)
 
-IF (Boost_FOUND)
-    ENABLE_TESTING ()
-ENDIF (Boost_FOUND)
-ADD_SUBDIRECTORY (test)
+IF (WITH_TESTING)
+    IF (Boost_FOUND)
+        ENABLE_TESTING ()
+    ENDIF()
+    ADD_SUBDIRECTORY (test)
+ENDIF()
