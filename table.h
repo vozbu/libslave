@@ -32,6 +32,7 @@ namespace slave
 
 typedef std::unique_ptr<Field> PtrField;
 typedef std::function<void (RecordSet&)> callback;
+typedef std::function<void (const std::string&, const std::string&, const std::vector<PtrField>&)> ddl_callback;
 typedef EventKind filter;
 
 

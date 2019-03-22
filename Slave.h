@@ -50,6 +50,7 @@ public:
     typedef std::set<std::pair<std::string, std::string>> table_order_t;
     typedef std::map<std::pair<std::string, std::string>, callback> callbacks_t;
     typedef std::map<std::pair<std::string, std::string>, filter> filters_t;
+    typedef std::map<std::pair<std::string, std::string>, ddl_callback> ddl_callbacks_t;
 
     typedef std::vector<std::string> cols_t;
     typedef std::map<std::pair<std::string, std::string>, cols_t> column_filters_t;
@@ -71,6 +72,7 @@ private:
 
     table_order_t m_table_order;
     callbacks_t m_callbacks;
+    ddl_callbacks_t m_ddl_callbacks;
     filters_t m_filters;
     column_filters_t m_column_filters;
     row_types_t m_row_types;
@@ -126,6 +128,12 @@ public:
         m_row_types[key] = row_type;
 
         ext_state.initTableCount(_db_name + "." + _tbl_name);
+    }
+
+    void setDDLCallback(const std::string& _db_name, const std::string& _tbl_name, ddl_callback _callback)
+    {
+        const auto key = std::make_pair(_db_name, _tbl_name);
+        m_ddl_callbacks[key] = _callback;
     }
 
     void setXidCallback(xid_callback_t _callback)
