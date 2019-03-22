@@ -176,7 +176,8 @@ void Slave::createTable(RelayLogInfo& rli,
     conn.query("SHOW FULL COLUMNS FROM " + tbl_name + " IN " + db_name);
     conn.store(res);
 
-    std::unique_ptr<Table> table(new Table(db_name, tbl_name));
+    Table *table_ = new Table(db_name, tbl_name);
+    std::unique_ptr<Table> table(table_);
 
     LOG_DEBUG(log, "Created new Table object: database:" << db_name << " table: " << tbl_name );
 
@@ -338,6 +339,11 @@ void Slave::createTable(RelayLogInfo& rli,
 
     rli.setTable(tbl_name, db_name, std::move(table));
 
+    const auto key = std::make_pair(db_name, tbl_name);
+    auto it = m_ddl_callbacks.find(key);
+    if (it != m_ddl_callbacks.end()) {
+        it->second(db_name, tbl_name, table_->fields);
+    }
 }
 
 namespace
