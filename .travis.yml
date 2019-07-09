@@ -5,11 +5,12 @@ addons:
         sources: &default_sources
             - boost-latest
         packages: &default_packages
-            - libboost1.55-all-dev
+            - libboost-all-dev
 
 matrix:
   include:
     - os: linux
+      dist: xenial
       addons:
         apt:
           sources:
@@ -22,17 +23,15 @@ matrix:
         - MATRIX_EVAL="CC=gcc-8 && CXX=g++-8"
 
     - os: linux
+      dist: xenial
       addons:
         apt:
           sources:
             - *default_sources
-            - llvm-toolchain-trusty-6.0
           packages:
             - *default_packages
-            - libllvm6.0 llvm-6.0 llvm-6.0-dev llvm-6.0-runtime
-            - clang-6.0 clang-tools-6.0 libclang-common-6.0-dev libclang-6.0-dev libclang1-6.0
       env:
-        - MATRIX_EVAL="CC=clang-6.0 && CXX=clang++-6.0"
+        - MATRIX_EVAL="CC=clang-7.0 && CXX=clang++-7.0"
 
 before_install:
     - eval "${MATRIX_EVAL}"
