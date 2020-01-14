@@ -1631,6 +1631,48 @@ namespace // anonymous
         f.checkInsertValue(uint32_t(12), "12", "", "stat");
     }
 
+    void test_RenameTable()
+    {
+        Fixture f;
+        f.conn->query("DROP TABLE IF EXISTS test, test_temp");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test (value int)");
+
+        f.conn->query("RENAME TABLE test TO test_temp");
+        f.conn->query("ALTER TABLE test_temp DROP COLUMN value, ADD COLUMN value varchar(50)");
+        f.conn->query("RENAME TABLE test_temp TO test");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "");
+
+        f.conn->query("DROP TABLE IF EXISTS stat, stat_temp");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test.stat (value varchar(50))");
+        f.conn->query("RENAME TABLE test TO test_temp");
+        f.conn->query("ALTER TABLE test_temp DROP COLUMN value, ADD COLUMN value int");
+        f.conn->query("RENAME TABLE `test`.`test_temp` TO `test`.`test`, stat TO stat_temp");
+        f.checkInsertValue(uint32_t(12), "12", "");
+
+        f.conn->query("ALTER TABLE test RENAME test_temp");
+        f.conn->query("ALTER TABLE test_temp DROP COLUMN value, ADD COLUMN value varchar(50)");
+        f.conn->query("ALTER TABLE test_temp \nRENAME TO test");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "");
+
+        f.conn->query("ALTER TABLE test RENAME test_temp");
+        f.conn->query("ALTER TABLE test_temp DROP COLUMN value, ADD COLUMN value int");
+        f.conn->query("ALTER TABLE `test`.`test_temp` FORCE, RENAME AS `test`.`test`");
+        f.checkInsertValue(uint32_t(12), "12", "");
+
+        f.conn->query("ALTER TABLE stat_temp DROP COLUMN value, ADD COLUMN value int");
+        f.conn->query("RENAME TABLE test TO test_temp");
+        f.conn->query("ALTER TABLE test_temp DROP COLUMN value, ADD COLUMN value varchar(50)");
+        f.conn->query("RENAME /* comment */ \nTABLE   test_temp \n to `test`, `stat_temp` to `test`.`stat`");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "");
+        f.checkInsertValue(uint32_t(12), "12", "", "stat");
+
+        f.conn->query("ALTER TABLE test RENAME test_temp");
+        f.conn->query("ALTER TABLE test_temp DROP COLUMN value, ADD COLUMN value int");
+        f.conn->query("/* first comment   */ ALTER /* second loooooo\noooong \n comment */ TABLE "
+                      "test_temp RENAME /**/ test");
+        f.checkInsertValue(uint32_t(12), "12", "");
+    }
+
     void test_GtidParsing()
     {
         slave::Position pos;
@@ -1727,6 +1769,7 @@ test_suite* init_unit_test_suite(int argc, char* argv[])
     ADD_FIXTURE_TEST(test_BinlogRowImageOption);
     ADD_FIXTURE_TEST(test_InsertNullValue);
     ADD_FIXTURE_TEST(test_AlterCreateTable);
+    ADD_FIXTURE_TEST(test_RenameTable);
     ADD_FIXTURE_TEST(test_GtidParsing);
     ADD_FIXTURE_TEST(test_GtidAdding);
 

@@ -18,6 +18,7 @@
 #include <regex>
 #include <string>
 
+#include "aux/parse_list.h"
 #include "Slave.h"
 #include "SlaveStats.h"
 
@@ -794,18 +795,56 @@ void Slave::do_checksum_handshake(MYSQL* mysql)
 
 namespace
 {
-std::string checkAlterOrCreateQuery(const std::string& str)
+std::vector<std::string> checkAlterOrCreateQuery(const std::string& str)
 {
-    static const std::regex query_regex(R"(\s*(?:alter\s+table|create\s+table(?:\s+if\s+not\s+exists)?)\s+(?:`?\w+`?\.)?`?(\w+)`?(?:[^\w\.`].*$|$))",
-                                        std::regex_constants::optimize | std::regex_constants::icase);
+    static const std::regex replace_regex(R"(/\*.*?\*/)", std::regex_constants::optimize);
+    static const std::regex alter_rename_regex(R"((?:alter\s+table\s+.*rename\s+)(?:to\s+|as\s+)?(?:`?\w+`?\.)?`?(\w+)`?)",
+                                               std::regex_constants::optimize | std::regex_constants::icase);
+    static const std::regex rename_regex(R"((?:rename\s+table\s+)(?:`?\w+`?\.)?`?(?:\w+)`?(?:\s+to\s+)(?:`?\w+`?\.)?`?(\w+)`?)",
+                                         std::regex_constants::optimize | std::regex_constants::icase);
+    static const std::regex rename_sub_regex(R"((?:`?\w+`?\.)?`?(?:\w+)`?(?:\s+to\s+)(?:`?\w+`?\.)?`?(\w+)`?)",
+                                             std::regex_constants::optimize | std::regex_constants::icase);
+    static const std::regex common_regex(R"((?:alter\s+table|create\s+table(?:\s+if\s+not\s+exists)?)\s+(?:`?\w+`?\.)?`?(\w+)`?)",
+                                         std::regex_constants::optimize | std::regex_constants::icase);
 
+    // replace newlines and comments to whitespaces
     std::string s;
     std::replace_copy(str.begin(), str.end(), std::back_inserter(s), '\n', ' ');
+    s = std::regex_replace(s, replace_regex, " ");
 
+    std::vector<std::string> tables;
     std::smatch sm;
-    if (std::regex_match(s, sm, query_regex))
-        return sm[1];
-    return "";
+    // check statement on ALTER TABLE ... RENAME ...
+    if (std::regex_search(s, sm, alter_rename_regex))
+    {
+        tables.emplace_back(sm[1]);
+    }
+    // check statement on RENAME TABLE ... TO ..., ... TO ..., ...
+    else if (std::regex_search(s, sm, rename_regex))
+    {
+        tables.emplace_back(sm[1]);
+        bool first = true;
+        aux::parse_list(s.c_str(), [&first, &tables](std::string_view sub)
+        {
+            if (first)
+            {
+                first = false;
+                return;
+            }
+
+            std::match_results<std::string_view::const_iterator> sm;
+            if (std::regex_search(sub.begin(), sub.end(), sm, rename_sub_regex))
+            {
+                tables.emplace_back(sm[1]);
+            }
+        });
+    }
+    // check statement on CREATE or common ALTER
+    else if (std::regex_search(s, sm, common_regex))
+    {
+        tables.emplace_back(sm[1]);
+    }
+    return tables;
 }
 }// anonymouos-namespace
 
@@ -829,8 +868,8 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo& m_rli
 
         LOG_TRACE(log, "Received QUERY_EVENT: " << qei.query);
 
-        const auto tbl_name = checkAlterOrCreateQuery(qei.query);
-        if (!tbl_name.empty())
+        const auto& tbl_names = checkAlterOrCreateQuery(qei.query);
+        for (const auto& tbl_name : tbl_names)
         {
             const auto key = std::make_pair(qei.db_name, tbl_name);
             if (m_table_order.count(key) == 1)
