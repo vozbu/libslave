@@ -37,7 +37,7 @@ Build requirements
 
 For building the library, you will need:
 
- * g++ with C++11 support.
+ * g++ with C++17 support.
 
  * The standard mysql C client libraries (libmysqlclient):
    * for 5.6-5.7 versions you will need place **hash.h** from mysql repo
