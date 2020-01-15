@@ -25,7 +25,7 @@ FIND_PACKAGE (Boost REQUIRED)
 INCLUDE_DIRECTORIES (${Boost_INCLUDE_DIRS})
 FIND_PACKAGE (Boost 1.41.0 COMPONENTS unit_test_framework system)
 # Fixes a lot of annoying warnings about auto_ptr deprecation
-ADD_DEFINITIONS (-DBOOST_NO_AUTO_PTR)
+ADD_COMPILE_DEFINITIONS (BOOST_NO_AUTO_PTR)
 
 INCLUDE (FindPackageHandleStandardArgs)
 FIND_PATH (IMYSQL mysql/mysql.h)
