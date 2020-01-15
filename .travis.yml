@@ -10,7 +10,6 @@ addons:
 matrix:
   include:
     - os: linux
-      dist: xenial
       addons:
         apt:
           sources:
@@ -23,7 +22,6 @@ matrix:
         - MATRIX_EVAL="CC=gcc-8 && CXX=g++-8"
 
     - os: linux
-      dist: xenial
       addons:
         apt:
           sources:
@@ -37,6 +35,10 @@ before_install:
     - eval "${MATRIX_EVAL}"
 
 before_script:
+    - wget https://dev.mysql.com/get/mysql-apt-config_0.8.14-1_all.deb
+    - sudo dpkg -i mysql-apt-config_0.8.14-1_all.deb
+    - sudo apt-get update -q
+    - sudo apt-get install -q -y --allow-unauthenticated -o Dpkg::Options::=--force-confnew libmysqlclient-dev
     - mkdir build
     - cd build
     - cmake .. -DCMAKE_BUILD_TYPE=Release

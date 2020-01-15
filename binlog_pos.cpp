@@ -6,10 +6,6 @@
 #include <memory>
 
 #include <alloca.h>
-#include <mysql/my_global.h>
-#undef min
-#undef max
-#undef test
 
 #include "binlog_pos.h"
 #include "slave_log_event.h"
