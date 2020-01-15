@@ -4,11 +4,11 @@ ABOUT
 ===================================================================
 
 This is a library that allows any arbitrary C++ application to connect
-to a Mysql replication master and read/parse the replication binary
+to a MySQL replication master and read/parse the replication binary
 logs.
 
-In effect, any application can now act like a Mysql replication slave,
-without having to compile or link with any Mysql server code.
+In effect, any application can now act like a MySQL replication slave,
+without having to compile or link with any MySQL server code.
 
 One important use-case for this library is for receiving changes in
 the master database in real-time, without having the store the
@@ -16,8 +16,9 @@ master's data on the client server.
 
 Features
 -------------------------------------------------------------------
-* Statistics of rps and time of every event in every table.
-* Support for mysql options:
+* Statistics of rps and execution time of user callbacks for every
+event in every table.
+* Support for MySQL options:
   * binlog_checksum=(NONE,CRC32)
   * binlog_row_image=(full,minimal)
   * GTID or log name and position positioning
@@ -28,6 +29,9 @@ a table in callback.
 value storing.
 * Store field values in `vector` by indexes instead of `std::map`
 by names. Must be used in conjunction with column filter.
+* Handling DDL queries like `CREATE TABLE`, `ALTER TABLE` and
+`RENAME TABLE` (the latter is crucial for alters via
+[gh-ost](https://github.com/github/gh-ost) to work).
 
 USAGE
 ===================================================================
@@ -39,12 +43,12 @@ For building the library, you will need:
 
  * g++ with C++17 support.
 
- * The standard mysql C client libraries (libmysqlclient):
-   * for 5.6-5.7 versions you will need place **hash.h** from mysql repo
-     into your mysql include directory.
+ * The standard MySQL C client libraries (libmysqlclient):
+   * for 5.6-5.7 versions you will need place **hash.h** from MySQL repo
+     into your `mysql` include directory.
 
  * The headers of the boost libraries (http://www.boost.org).
-   At the minimum, you will need at least the any.hpp.
+   You will need at least the any.hpp.
    If boost_unit_test_framework is found, tests will be built.
 
  * You (likely) will need to review and edit the contents of Logging.h
@@ -55,16 +59,16 @@ For building the library, you will need:
 
 Usage requirements
 -------------------------------------------------------------------
- * Requires >= Mysql 5.1.23 and <= Mysql 5.7.12. Tested with some of the 5.1, 5.5, 5.6, 5.7
+ * Requires >= MySQL 5.1.23 and <= MySQL 5.7.12. Tested with some of the 5.1, 5.5, 5.6, 5.7
    versions of mysql servers.
  * Requires rights `REPLICATION SLAVE` and `REPLICATION CLIENT`, and `SELECT` for tables being used.
 
 Compiling
 -------------------------------------------------------------------
 
-Create directory "build" in source tree, step into it and run
-"cmake .. -DCMAKE_BUILD_TYPE=Release".
-Then, if configure step is complete, run "make".
+Create directory `build` in source tree, step into it and run
+`cmake .. -DCMAKE_BUILD_TYPE=Release`.
+Then, if configure step is complete, run `make`.
 
 Review and edit Logging.h and SlaveStats.h to interface the library to
 your app's logging and monitoring subsystems.
