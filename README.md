@@ -45,7 +45,7 @@ For building the library, you will need:
 
  * The standard MySQL C client libraries (libmysqlclient):
    * for 5.6-5.7 versions you will need place **hash.h** from MySQL repo
-     into your `mysql` include directory.
+     into your `mysql` include directory (see [bug #70672](https://bugs.mysql.com/bug.php?id=70672)).
 
  * The headers of the boost libraries (http://www.boost.org).
    You will need at least the any.hpp.
