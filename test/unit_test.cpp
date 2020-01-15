@@ -21,14 +21,6 @@ using namespace boost::unit_test;
 #include "nanomysql.h"
 #include "types.h"
 
-namespace std
-{
-    inline std::ostream& operator << (std::ostream& os, std::nullptr_t n)
-    {
-        return os << "nullptr";
-    }
-}// std
-
 namespace // anonymous
 {
     const std::string TestDataDir = "test/data/";
