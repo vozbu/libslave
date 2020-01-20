@@ -865,6 +865,7 @@ namespace // anonymous
         MYSQL_TINYTEXT,
         MYSQL_TEXT,
         MYSQL_DECIMAL,
+        MYSQL_DOUBLE,
         MYSQL_BIT,
         MYSQL_SET,
         MYSQL_TIMESTAMP,
@@ -948,6 +949,14 @@ namespace // anonymous
         static const std::string name;
     };
     const std::string MYSQL_type_traits<MYSQL_DECIMAL>::name = "DECIMAL";
+
+    template <>
+    struct MYSQL_type_traits<MYSQL_DOUBLE>
+    {
+        typedef slave::types::MY_DOUBLE slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_DOUBLE>::name = "DOUBLE";
 
     template <>
     struct MYSQL_type_traits<MYSQL_BIT>
@@ -1117,6 +1126,7 @@ namespace // anonymous
         testOneType<boost::mpl::int_<MYSQL_TINYTEXT>>(f);
         testOneType<boost::mpl::int_<MYSQL_TEXT>>(f);
         testOneType<boost::mpl::int_<MYSQL_DECIMAL>>(f);
+        testOneType<boost::mpl::int_<MYSQL_DOUBLE>>(f);
         testOneType<boost::mpl::int_<MYSQL_BIT>>(f);
         testOneType<boost::mpl::int_<MYSQL_SET>>(f);
         testOneType<boost::mpl::int_<MYSQL_TIMESTAMP>>(f);
