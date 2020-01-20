@@ -1024,6 +1024,11 @@ namespace // anonymous
         is >> t;
     }
 
+    void getValue(const std::string& s, slave::decimal::Decimal& t)
+    {
+        slave::decimal::from_string(s.c_str(), t);
+    }
+
     void getValue(const std::string& s, std::string& t)
     {
         t = s;

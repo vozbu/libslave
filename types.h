@@ -5,6 +5,8 @@
 #include <string>
 #include <time.h>
 
+#include "decimal.h"
+
 // conflict with macro defined in mysql
 #ifdef test
 #undef test
@@ -30,7 +32,7 @@ namespace types
     typedef unsigned long long  MY_SET;
     typedef float               MY_FLOAT;
     typedef double              MY_DOUBLE;
-    typedef double              MY_DECIMAL;
+    typedef decimal::Decimal    MY_DECIMAL;
     typedef uint32_t            MY_DATE;
     typedef int32_t             MY_TIME;
     typedef unsigned long long  MY_DATETIME;
@@ -106,6 +108,7 @@ enum class RowType {
                                     , float
                                     , double
                                     , std::string
+                                    , decimal::Decimal
                                     >;
     inline std::nullptr_t nullFieldValue() { return nullptr; }
     inline bool isNullFieldValue(const FieldValue& v) { return v.type() == typeid(std::nullptr_t); }

@@ -262,7 +262,6 @@ public:
 };
 
 class Field_decimal : public Field_longstr {
-    double dec2double(const char*);
     int intg;
     int frac;
 public:
