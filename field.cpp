@@ -25,7 +25,7 @@
 
 #include <mysql/m_string.h>
 
-#include "dec_util.h"
+#include "decimal_internal.h"
 #include "field.h"
 
 #include "Logging.h"
@@ -634,24 +634,13 @@ Field_decimal::Field_decimal(const std::string& field_name_arg, const std::strin
 
 const char* Field_decimal::unpack(const char *from)
 {
-    double result = dec2double(from);
+    decimal::Decimal result;
+    // maybe_unused, because it is only output to log as for now
+    [[maybe_unused]]
+    decimal::error err = decimal::from_binary(from, result, intg + frac, frac);
+    LOG_TRACE(log, "decimal::unpack: -> '" << result << "', " << err);
     field_data = result;
     return from + pack_length();
-}
-
-double Field_decimal::dec2double(const char* from)
-{
-    decimal_t val;
-    val.len = intg + frac;
-    size_t bytes = val.len * sizeof(decimal_digit_t);
-    val.buf = (decimal_digit_t *)alloca(bytes);
-    memset(val.buf, 0, bytes);
-
-    dec_util::bin2dec(from, &val, intg+frac, frac);
-    double v = 0;
-    dec_util::dec2dbl(&val, &v);
-
-    return v;
 }
 
 

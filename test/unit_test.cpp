@@ -17,6 +17,8 @@ using namespace boost::unit_test;
 #include <mutex>
 #include <thread>
 
+#include "decimal_internal.h"
+#include "decimal_supp.h"
 #include "Slave.h"
 #include "nanomysql.h"
 #include "types.h"
@@ -865,6 +867,7 @@ namespace // anonymous
         MYSQL_TINYTEXT,
         MYSQL_TEXT,
         MYSQL_DECIMAL,
+        MYSQL_DOUBLE,
         MYSQL_BIT,
         MYSQL_SET,
         MYSQL_TIMESTAMP,
@@ -950,6 +953,14 @@ namespace // anonymous
     const std::string MYSQL_type_traits<MYSQL_DECIMAL>::name = "DECIMAL";
 
     template <>
+    struct MYSQL_type_traits<MYSQL_DOUBLE>
+    {
+        typedef slave::types::MY_DOUBLE slave_type;
+        static const std::string name;
+    };
+    const std::string MYSQL_type_traits<MYSQL_DOUBLE>::name = "DOUBLE";
+
+    template <>
     struct MYSQL_type_traits<MYSQL_BIT>
     {
         typedef slave::types::MY_BIT slave_type;
@@ -1011,6 +1022,11 @@ namespace // anonymous
         std::istringstream is;
         is.str(s);
         is >> t;
+    }
+
+    void getValue(const std::string& s, slave::decimal::Decimal& t)
+    {
+        slave::decimal::from_string(s.c_str(), t);
     }
 
     void getValue(const std::string& s, std::string& t)
@@ -1117,6 +1133,7 @@ namespace // anonymous
         testOneType<boost::mpl::int_<MYSQL_TINYTEXT>>(f);
         testOneType<boost::mpl::int_<MYSQL_TEXT>>(f);
         testOneType<boost::mpl::int_<MYSQL_DECIMAL>>(f);
+        testOneType<boost::mpl::int_<MYSQL_DOUBLE>>(f);
         testOneType<boost::mpl::int_<MYSQL_BIT>>(f);
         testOneType<boost::mpl::int_<MYSQL_SET>>(f);
         testOneType<boost::mpl::int_<MYSQL_TIMESTAMP>>(f);
@@ -1746,6 +1763,121 @@ namespace // anonymous
         BOOST_CHECK_EQUAL(ref2.size(), 1);
         BOOST_CHECK(ref2.front() == slave::gtid_interval_t(2, 2));
     }
+
+    void test_Decimal()
+    {
+        slave::decimal::Decimal d;
+
+        slave::decimal::from_string("0", d);
+        BOOST_TEST("0" == slave::decimal::to_string(d));
+        BOOST_TEST(0 == slave::decimal::to_double(d));
+
+        slave::decimal::from_string("1", d);
+        BOOST_TEST("1" == slave::decimal::to_string(d));
+        BOOST_TEST(1 == slave::decimal::to_double(d));
+
+        slave::decimal::from_string("1.1", d);
+        BOOST_TEST("1.1" == slave::decimal::to_string(d));
+        BOOST_TEST(1.1 == slave::decimal::to_double(d));
+
+        slave::decimal::from_string("-1.1", d);
+        BOOST_TEST("-1.1" == slave::decimal::to_string(d));
+        BOOST_TEST(-1.1 == slave::decimal::to_double(d));
+
+        slave::decimal::from_string("-0.9", d);
+        BOOST_TEST("-0.9" == slave::decimal::to_string(d));
+        BOOST_TEST(-0.9 == slave::decimal::to_double(d));
+
+        slave::decimal::from_string("-999999999999999999999999.9999999999", d);
+        BOOST_TEST("-999999999999999999999999.9999999999" == slave::decimal::to_string(d));
+        BOOST_TEST(-999999999999999999999999.9999999999 == slave::decimal::to_double(d));
+
+        slave::decimal::from_string("-9999999999999999999999999999999999999999999999999999999.9999999999", d);
+        BOOST_TEST("-9999999999999999999999999999999999999999999999999999999.9999999999" == slave::decimal::to_string(d));
+
+        slave::decimal::from_string("10123456789098765432.0987654320123456789", d);
+        BOOST_TEST("10123456789098765432.0987654320123456789" == slave::decimal::to_string(d));
+    }
+
+    void test_DecimalIterators()
+    {
+        slave::decimal::Decimal d;
+        {
+            slave::decimal::from_string("0", d);
+            slave::decimal::IntegerDigits idigits(d);
+            BOOST_REQUIRE(1 == std::distance(idigits.begin(), idigits.end()));
+            BOOST_TEST((slave::decimal::digit_and_count_t(0, 1) == *idigits.begin()));
+            slave::decimal::FractionalDigits fdigits(d);
+            BOOST_TEST(0 == std::distance(fdigits.begin(), fdigits.end()));
+        }
+        {
+            slave::decimal::from_string("1.1", d);
+            slave::decimal::IntegerDigits idigits(d);
+            BOOST_REQUIRE(1 == std::distance(idigits.begin(), idigits.end()));
+            BOOST_TEST((slave::decimal::digit_and_count_t(1, 1) == *idigits.begin()));
+            slave::decimal::FractionalDigits fdigits(d);
+            BOOST_REQUIRE(1 == std::distance(fdigits.begin(), fdigits.end()));
+            BOOST_TEST((slave::decimal::digit_and_count_t(1, 1) == *fdigits.begin()));
+        }
+        {
+            slave::decimal::from_string("10123456789098765432.0987654320123456789", d);
+            slave::decimal::IntegerDigits idigits(d);
+            BOOST_REQUIRE(3 == std::distance(idigits.begin(), idigits.end()));
+            auto it = idigits.begin();
+            BOOST_TEST((slave::decimal::digit_and_count_t(10, 2) == *it));
+            BOOST_TEST((slave::decimal::digit_and_count_t(123456789, 9) == *++it));
+            BOOST_TEST((slave::decimal::digit_and_count_t(98765432, 9) == *++it));
+            auto rit = idigits.rbegin();
+            BOOST_TEST((slave::decimal::digit_and_count_t(98765432, 9) == *rit));
+            BOOST_TEST((slave::decimal::digit_and_count_t(123456789, 9) == *++rit));
+            BOOST_TEST((slave::decimal::digit_and_count_t(10, 2) == *++rit));
+
+            slave::decimal::FractionalDigits fdigits(d);
+            BOOST_REQUIRE(3 == std::distance(fdigits.begin(), fdigits.end()));
+            auto fit = fdigits.begin();
+            BOOST_TEST((slave::decimal::digit_and_count_t(98765432, 9) == *fit));
+            BOOST_TEST((slave::decimal::digit_and_count_t(12345678, 9) == *++fit));
+            BOOST_TEST((slave::decimal::digit_and_count_t(9, 1) == *++fit));
+            auto rfit = fdigits.rbegin();
+            BOOST_TEST((slave::decimal::digit_and_count_t(9, 1) == *rfit));
+            BOOST_TEST((slave::decimal::digit_and_count_t(12345678, 9) == *++rfit));
+            BOOST_TEST((slave::decimal::digit_and_count_t(98765432, 9) == *++rfit));
+        }
+        {
+            slave::decimal::from_string("12123456789123456789123456789123456789123456789123456789123456789", d);
+            slave::decimal::IntegerDigits idigits(d);
+            BOOST_REQUIRE(8 == std::distance(idigits.begin(), idigits.end()));
+            auto it = idigits.begin();
+            BOOST_TEST((slave::decimal::digit_and_count_t(12, 2) == *it));
+            for (size_t i = 0; i < 7; ++i)
+                BOOST_TEST((slave::decimal::digit_and_count_t(123456789, 9) == *++it));
+
+            auto rit = idigits.rbegin();
+            for (size_t i = 0; i < 7; ++i, ++rit)
+                BOOST_TEST((slave::decimal::digit_and_count_t(123456789, 9) == *rit));
+
+            BOOST_TEST((slave::decimal::digit_and_count_t(12, 2) == *rit));
+            slave::decimal::FractionalDigits fdigits(d);
+            BOOST_TEST(0 == std::distance(fdigits.begin(), fdigits.end()));
+        }
+        {
+            slave::decimal::from_string("0.123456789123456789123456789123", d);
+            slave::decimal::IntegerDigits idigits(d);
+            BOOST_REQUIRE(1 == std::distance(idigits.begin(), idigits.end()));
+            BOOST_TEST((slave::decimal::digit_and_count_t(0, 1) == *idigits.begin()));
+            slave::decimal::FractionalDigits fdigits(d);
+            BOOST_TEST(4 == std::distance(fdigits.begin(), fdigits.end()));
+            auto it = fdigits.begin();
+            for (size_t i = 0; i < 3; ++i, ++it)
+                BOOST_TEST((slave::decimal::digit_and_count_t(123456789, 9) == *it));
+            BOOST_TEST((slave::decimal::digit_and_count_t(123, 3) == *it));
+
+            auto rit = fdigits.rbegin();
+            BOOST_TEST((slave::decimal::digit_and_count_t(123, 3) == *rit));
+            for (size_t i = 0; i < 3; ++i)
+                BOOST_TEST((slave::decimal::digit_and_count_t(123456789, 9) == *++rit));
+        }
+    }
 }// anonymous-namespace
 
 test_suite* init_unit_test_suite(int argc, char* argv[])
@@ -1764,6 +1896,8 @@ test_suite* init_unit_test_suite(int argc, char* argv[])
     ADD_FIXTURE_TEST(test_RenameTable);
     ADD_FIXTURE_TEST(test_GtidParsing);
     ADD_FIXTURE_TEST(test_GtidAdding);
+    ADD_FIXTURE_TEST(test_Decimal);
+    ADD_FIXTURE_TEST(test_DecimalIterators);
 
 #undef ADD_FIXTURE_TEST
 
