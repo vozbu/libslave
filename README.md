@@ -32,6 +32,7 @@ by names. Must be used in conjunction with column filter.
 * Handling DDL queries like `CREATE TABLE`, `ALTER TABLE` and
 `RENAME TABLE` (the latter is crucial for alters via
 [gh-ost](https://github.com/github/gh-ost) to work).
+* Honest and flexible decimal type support.
 
 USAGE
 ===================================================================
