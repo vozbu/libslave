@@ -635,6 +635,8 @@ Field_decimal::Field_decimal(const std::string& field_name_arg, const std::strin
 const char* Field_decimal::unpack(const char *from)
 {
     decimal::Decimal result;
+    // maybe_unused, because it is only output to log as for now
+    [[maybe_unused]]
     decimal::error err = decimal::from_binary(from, result, intg + frac, frac);
     LOG_TRACE(log, "decimal::unpack: -> '" << result << "', " << err);
     field_data = result;
