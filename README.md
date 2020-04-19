@@ -24,7 +24,7 @@ event in every table.
   * GTID or log name and position positioning
 * Column filter - you can receive only desired subset of fields from
 a table in callback.
-* Distinguish between absense of field and NULL field.
+* Distinguish between absence of field and NULL field.
 * Optional use `boost::variant` instead of `boost::any` for field
 value storing.
 * Store field values in `vector` by indexes instead of `std::map`
@@ -32,6 +32,14 @@ by names. Must be used in conjunction with column filter.
 * Handling DDL queries like `CREATE TABLE`, `ALTER TABLE` and
 `RENAME TABLE` (the latter is crucial for alters via
 [gh-ost](https://github.com/github/gh-ost) to work).
+    * However, it's not recommended to alter any particular table too often,
+because at the moment when libslave reaches alter query in binlog it
+reads **current** database schema from database (issuing `SHOW CREATE
+TABLE` query (because libslave can't parse and apply alter queries
+itself)), and if this schema is already changed again by subsequent alter
+query, then binlog events between these two alters will be read as if
+scheme is already in the state after second alter, i.e. incorrectly and
+without any notice.
 * Honest and flexible decimal type support.
 
 USAGE
