@@ -795,16 +795,16 @@ void Slave::do_checksum_handshake(MYSQL* mysql)
 
 namespace
 {
-std::vector<std::string> checkAlterOrCreateQuery(const std::string& str)
+std::vector<std::pair<std::string, std::string>> checkAlterOrCreateQuery(const std::string& str)
 {
     static const std::regex replace_regex(R"(/\*.*?\*/)", std::regex_constants::optimize);
-    static const std::regex alter_rename_regex(R"((?:alter\s+table\s+.*rename\s+)(?:to\s+|as\s+)?(?:`?\w+`?\.)?`?(\w+)`?)",
+    static const std::regex alter_rename_regex(R"((?:alter\s+table\s+.*rename\s+)(?:to\s+|as\s+)?(?:`?(\w+)`?\.)?`?(\w+)`?)",
                                                std::regex_constants::optimize | std::regex_constants::icase);
-    static const std::regex rename_regex(R"((?:rename\s+table\s+)(?:`?\w+`?\.)?`?(?:\w+)`?(?:\s+to\s+)(?:`?\w+`?\.)?`?(\w+)`?)",
+    static const std::regex rename_regex(R"((?:rename\s+table\s+)(?:`?\w+`?\.)?`?(?:\w+)`?(?:\s+to\s+)(?:`?(\w+)`?\.)?`?(\w+)`?)",
                                          std::regex_constants::optimize | std::regex_constants::icase);
-    static const std::regex rename_sub_regex(R"((?:`?\w+`?\.)?`?(?:\w+)`?(?:\s+to\s+)(?:`?\w+`?\.)?`?(\w+)`?)",
+    static const std::regex rename_sub_regex(R"((?:`?\w+`?\.)?`?(?:\w+)`?(?:\s+to\s+)(?:`?(\w+)`?\.)?`?(\w+)`?)",
                                              std::regex_constants::optimize | std::regex_constants::icase);
-    static const std::regex common_regex(R"((?:alter\s+table|create\s+table(?:\s+if\s+not\s+exists)?)\s+(?:`?\w+`?\.)?`?(\w+)`?)",
+    static const std::regex common_regex(R"((?:alter\s+table|create\s+table(?:\s+if\s+not\s+exists)?)\s+(?:`?(\w+)`?\.)?`?(\w+)`?)",
                                          std::regex_constants::optimize | std::regex_constants::icase);
 
     // replace newlines and comments to whitespaces
@@ -812,17 +812,17 @@ std::vector<std::string> checkAlterOrCreateQuery(const std::string& str)
     std::replace_copy(str.begin(), str.end(), std::back_inserter(s), '\n', ' ');
     s = std::regex_replace(s, replace_regex, " ");
 
-    std::vector<std::string> tables;
+    std::vector<std::pair<std::string, std::string>> tables;
     std::smatch sm;
     // check statement on ALTER TABLE ... RENAME ...
     if (std::regex_search(s, sm, alter_rename_regex))
     {
-        tables.emplace_back(sm[1]);
+        tables.emplace_back(sm[1], sm[2]);
     }
     // check statement on RENAME TABLE ... TO ..., ... TO ..., ...
     else if (std::regex_search(s, sm, rename_regex))
     {
-        tables.emplace_back(sm[1]);
+        tables.emplace_back(sm[1], sm[2]);
         bool first = true;
         aux::parse_list(s.c_str(), [&first, &tables](std::string_view sub)
         {
@@ -835,14 +835,14 @@ std::vector<std::string> checkAlterOrCreateQuery(const std::string& str)
             std::match_results<std::string_view::const_iterator> sm;
             if (std::regex_search(sub.begin(), sub.end(), sm, rename_sub_regex))
             {
-                tables.emplace_back(sm[1]);
+                tables.emplace_back(sm[1], sm[2]);
             }
         });
     }
     // check statement on CREATE or common ALTER
     else if (std::regex_search(s, sm, common_regex))
     {
-        tables.emplace_back(sm[1]);
+        tables.emplace_back(sm[1], sm[2]);
     }
     return tables;
 }
@@ -871,10 +871,10 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo& m_rli
         const auto& tbl_names = checkAlterOrCreateQuery(qei.query);
         for (const auto& tbl_name : tbl_names)
         {
-            const auto key = std::make_pair(qei.db_name, tbl_name);
+            const auto key = std::make_pair(!tbl_name.first.empty() ? tbl_name.first : qei.db_name, tbl_name.second);
             if (m_table_order.count(key) == 1)
             {
-                LOG_DEBUG(log, "Rebuilding database structure.");
+                LOG_DEBUG(log, "Rebuilding database structure: " << key.first << "." << key.second);
                 table_order_t order {key};
                 createDatabaseStructure_(order, m_rli);
                 auto it = m_rli.m_table_map.find(key);
