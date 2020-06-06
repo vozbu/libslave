@@ -369,12 +369,16 @@ namespace // anonymous
             conn->query("CREATE TABLE IF NOT EXISTS test (tmp int)");
             // Create another table for testing map_detailed stat.
             conn->query("CREATE TABLE IF NOT EXISTS stat (tmp int)");
+            // Create another database for testing alter in not default database
+            conn->query("CREATE DATABASE IF NOT EXISTS test2");
+            conn->query("CREATE TABLE IF NOT EXISTS test2.test2 (tmp int)");
 
             m_Slave.setMasterInfo(sMasterInfo);
             m_Slave.linkEventStat(&m_SlaveStat);
             // Set callback into Fixture - and it will call callbacks which will be set in tests.
             m_Slave.setCallback(cfg.mysql_db, "test", std::ref(m_Callback), slave::RowType::Map, filter);
             m_Slave.setCallback(cfg.mysql_db, "stat", std::ref(m_Callback), slave::RowType::Map, filter);
+            m_Slave.setCallback("test2", "test2", std::ref(m_Callback), slave::RowType::Map, filter);
             m_Slave.init();
             startSlave();
         }
@@ -1638,6 +1642,13 @@ namespace // anonymous
 
         f.conn->query("ALTER TABLE `stat` \n    DROP COLUMN `value`,\n    ADD COLUMN value int");
         f.checkInsertValue(uint32_t(12), "12", "", "stat");
+
+        // test for alter with explicitly specified database name that differs from default
+        f.conn->query("DROP TABLE IF EXISTS test2.test2");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test2.test2 (value int)");
+        f.checkInsertValue(uint32_t(12321), "12321", "", "test2.test2");
+        f.conn->query("ALTER TABLE test2.test2 DROP COLUMN value, ADD COLUMN value varchar(50)");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "", "test2.test2");
     }
 
     void test_RenameTable()
@@ -1680,6 +1691,37 @@ namespace // anonymous
         f.conn->query("/* first comment   */ ALTER /* second loooooo\noooong \n comment */ TABLE "
                       "test_temp RENAME /**/ test");
         f.checkInsertValue(uint32_t(12), "12", "");
+
+        // test for alter-rename with explicitly specified database name that differs from default
+        f.conn->query("DROP TABLE IF EXISTS test2.test2, test2.test_temp");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test2.test2 (value int)");
+        f.checkInsertValue(uint32_t(12321), "12321", "", "test2.test2");
+        f.conn->query("ALTER TABLE test2.test2 RENAME test2.test_temp");
+        f.conn->query("ALTER TABLE test2.test_temp DROP COLUMN value, ADD COLUMN value varchar(50)");
+        f.conn->query("ALTER TABLE test2.test_temp \nRENAME TO test2.test2");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "", "test2.test2");
+
+        // test for rename (first position) with explicitly specified database name that differs from default
+        f.conn->query("DROP TABLE IF EXISTS test2.test2, test2.test_temp");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test2.test2 (value int)");
+        f.checkInsertValue(uint32_t(12321), "12321", "", "test2.test2");
+        f.conn->query("DROP TABLE IF EXISTS test2.dummy, test2.dummy_temp");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test2.dummy (value int)");
+        f.conn->query("RENAME TABLE test2.test2 to test2.test_temp, test2.dummy to test2.dummy_temp");
+        f.conn->query("ALTER TABLE test2.test_temp DROP COLUMN value, ADD COLUMN value varchar(50)");
+        f.conn->query("RENAME TABLE test2.test_temp to test2.test2, test2.dummy_temp to test2.dummy");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "", "test2.test2");
+
+        // test for rename (not first position) with explicitly specified database name that differs from default
+        f.conn->query("DROP TABLE IF EXISTS test2.test2, test2.test_temp");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test2.test2 (value int)");
+        f.checkInsertValue(uint32_t(12321), "12321", "", "test2.test2");
+        f.conn->query("DROP TABLE IF EXISTS test2.dummy, test2.dummy_temp");
+        f.conn->query("CREATE TABLE IF NOT EXISTS test2.dummy (value int)");
+        f.conn->query("RENAME TABLE test2.dummy to test2.dummy_temp, test2.test2 to test2.test_temp");
+        f.conn->query("ALTER TABLE test2.test_temp DROP COLUMN value, ADD COLUMN value varchar(50)");
+        f.conn->query("RENAME TABLE test2.dummy_temp to test2.dummy, test2.test_temp to test2.test2");
+        f.checkInsertValue(std::string("test_value_is_here"), "'test_value_is_here'", "", "test2.test2");
     }
 
     void test_GtidParsing()

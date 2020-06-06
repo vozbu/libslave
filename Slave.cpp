@@ -794,36 +794,37 @@ void Slave::do_checksum_handshake(MYSQL* mysql)
 
 namespace
 {
-std::vector<std::string> checkAlterOrCreateQuery(const std::string& str)
+// returns table key list (db name + table name) based on query and default database name
+std::vector<slave::TableKey> checkAlterOrCreateQuery(const slave::Query_event_info& qei)
 {
     static const std::regex replace_regex(R"(/\*.*?\*/)", std::regex_constants::optimize);
-    static const std::regex alter_rename_regex(R"((?:alter\s+table\s+.*rename\s+)(?:to\s+|as\s+)?(?:`?\w+`?\.)?`?(\w+)`?)",
+    static const std::regex alter_rename_regex(R"((?:alter\s+table\s+.*rename\s+)(?:to\s+|as\s+)?(?:`?(\w+)`?\.)?`?(\w+)`?)",
                                                std::regex_constants::optimize | std::regex_constants::icase);
-    static const std::regex rename_regex(R"((?:rename\s+table\s+)(?:`?\w+`?\.)?`?(?:\w+)`?(?:\s+to\s+)(?:`?\w+`?\.)?`?(\w+)`?)",
+    static const std::regex rename_regex(R"((?:rename\s+table\s+)(?:`?\w+`?\.)?`?(?:\w+)`?(?:\s+to\s+)(?:`?(\w+)`?\.)?`?(\w+)`?)",
                                          std::regex_constants::optimize | std::regex_constants::icase);
-    static const std::regex rename_sub_regex(R"((?:`?\w+`?\.)?`?(?:\w+)`?(?:\s+to\s+)(?:`?\w+`?\.)?`?(\w+)`?)",
+    static const std::regex rename_sub_regex(R"((?:`?\w+`?\.)?`?(?:\w+)`?(?:\s+to\s+)(?:`?(\w+)`?\.)?`?(\w+)`?)",
                                              std::regex_constants::optimize | std::regex_constants::icase);
-    static const std::regex common_regex(R"((?:alter\s+table|create\s+table(?:\s+if\s+not\s+exists)?)\s+(?:`?\w+`?\.)?`?(\w+)`?)",
+    static const std::regex common_regex(R"((?:alter\s+table|create\s+table(?:\s+if\s+not\s+exists)?)\s+(?:`?(\w+)`?\.)?`?(\w+)`?)",
                                          std::regex_constants::optimize | std::regex_constants::icase);
 
     // replace newlines and comments to whitespaces
     std::string s;
-    std::replace_copy(str.begin(), str.end(), std::back_inserter(s), '\n', ' ');
+    std::replace_copy(qei.query.begin(), qei.query.end(), std::back_inserter(s), '\n', ' ');
     s = std::regex_replace(s, replace_regex, " ");
 
-    std::vector<std::string> tables;
+    std::vector<TableKey> tableKeys;
     std::smatch sm;
     // check statement on ALTER TABLE ... RENAME ...
     if (std::regex_search(s, sm, alter_rename_regex))
     {
-        tables.emplace_back(sm[1]);
+        tableKeys.emplace_back(sm[1], sm[2]);
     }
     // check statement on RENAME TABLE ... TO ..., ... TO ..., ...
     else if (std::regex_search(s, sm, rename_regex))
     {
-        tables.emplace_back(sm[1]);
+        tableKeys.emplace_back(sm[1], sm[2]);
         bool first = true;
-        aux::parse_list(s.c_str(), [&first, &tables](std::string_view sub)
+        aux::parse_list(s.c_str(), [&first, &tableKeys](std::string_view sub)
         {
             if (first)
             {
@@ -834,16 +835,25 @@ std::vector<std::string> checkAlterOrCreateQuery(const std::string& str)
             std::match_results<std::string_view::const_iterator> sm;
             if (std::regex_search(sub.begin(), sub.end(), sm, rename_sub_regex))
             {
-                tables.emplace_back(sm[1]);
+                tableKeys.emplace_back(sm[1], sm[2]);
             }
         });
     }
     // check statement on CREATE or common ALTER
     else if (std::regex_search(s, sm, common_regex))
     {
-        tables.emplace_back(sm[1]);
+        tableKeys.emplace_back(sm[1], sm[2]);
     }
-    return tables;
+
+    // if database name wasn't explicitly specified in query, take default database name
+    for (auto& tableKey: tableKeys)
+    {
+        if (tableKey.db_name.empty())
+        {
+            tableKey.db_name = qei.db_name;
+        }
+    }
+    return tableKeys;
 }
 }// anonymouos-namespace
 
@@ -867,13 +877,12 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo& m_rli
 
         LOG_TRACE(log, "Received QUERY_EVENT: " << qei.query);
 
-        const auto& tbl_names = checkAlterOrCreateQuery(qei.query);
-        for (const auto& tbl_name : tbl_names)
+        const auto& tableKeys = checkAlterOrCreateQuery(qei);
+        for (const auto& key : tableKeys)
         {
-            const TableKey key{qei.db_name, tbl_name};
             if (m_table_order.count(key) == 1)
             {
-                LOG_DEBUG(log, "Rebuilding database structure.");
+                LOG_DEBUG(log, "Rebuilding database structure: " << key.first << "." << key.second);
                 table_order_t order {key};
                 createDatabaseStructure_(order, m_rli);
                 auto it = m_rli.m_table_map.find(key);
