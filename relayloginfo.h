@@ -16,6 +16,7 @@
 #define __SLAVE_RELAYLOGINFO_H_
 
 #include "table.h"
+#include "TableKey.h"
 
 #include <map>
 #include <memory>
@@ -32,10 +33,10 @@ class RelayLogInfo {
 
 public:
 
-    typedef std::map<unsigned long, std::pair<std::string, std::string> > id_to_name_t;
+    typedef std::map<unsigned long, TableKey> id_to_name_t;
     id_to_name_t m_map_table_name;
 
-    typedef std::map<std::pair<std::string, std::string>, PtrTable> name_to_table_t;
+    typedef std::map<TableKey, PtrTable> name_to_table_t;
     name_to_table_t m_table_map;
 
 
@@ -46,21 +47,21 @@ public:
 
 
     void setTableName(unsigned long table_id, const std::string& table_name, const std::string& db_name) {
-        m_map_table_name[table_id] = std::make_pair(db_name, table_name);
+        m_map_table_name[table_id] = {db_name, table_name};
     }
 
-    const std::pair<std::string,std::string> getTableNameById(int table_id) const
+    TableKey getTableNameById(int table_id) const
     {
         id_to_name_t::const_iterator p = m_map_table_name.find(table_id);
 
         if (p != m_map_table_name.end()) {
             return p->second;
         } else {
-            return std::make_pair(std::string(), std::string());
+            return {};
         }
     }
 
-    const PtrTable& getTable(const std::pair<std::string, std::string>& key) const
+    const PtrTable& getTable(const TableKey& key) const
     {
         static const PtrTable empty;
         name_to_table_t::const_iterator p = m_table_map.find(key);
@@ -73,7 +74,7 @@ public:
 
     void setTable(const std::string& table_name, const std::string& db_name, PtrTable&& table)
     {
-        m_table_map[std::make_pair(db_name, table_name)] = std::move(table);
+        m_table_map[{db_name, table_name}] = std::move(table);
     }
 
 };

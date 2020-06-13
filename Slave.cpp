@@ -157,8 +157,8 @@ void Slave::createDatabaseStructure_(table_order_t& tabs, RelayLogInfo& rli) con
 
     for (table_order_t::const_iterator it = tabs.begin(); it != tabs.end(); ++ it) {
 
-        LOG_INFO( log, "Creating database structure for: " << it->first << ", Creating table for: " << it->second );
-        createTable(rli, it->first, it->second, collate_map, conn);
+        LOG_INFO( log, "Creating database structure for: " << it->db_name << ", Creating table for: " << it->table_name );
+        createTable(rli, it->db_name, it->table_name, collate_map, conn);
     }
 
     LOG_TRACE(log, "exit: createDatabaseStructure");
@@ -340,8 +340,7 @@ void Slave::createTable(RelayLogInfo& rli,
 
     rli.setTable(tbl_name, db_name, std::move(table));
 
-    const auto key = std::make_pair(db_name, tbl_name);
-    auto it = m_ddl_callbacks.find(key);
+    auto it = m_ddl_callbacks.find({db_name, tbl_name});
     if (it != m_ddl_callbacks.end()) {
         it->second(db_name, tbl_name, table_->fields);
     }
@@ -871,7 +870,7 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo& m_rli
         const auto& tbl_names = checkAlterOrCreateQuery(qei.query);
         for (const auto& tbl_name : tbl_names)
         {
-            const auto key = std::make_pair(qei.db_name, tbl_name);
+            const TableKey key{qei.db_name, tbl_name};
             if (m_table_order.count(key) == 1)
             {
                 LOG_DEBUG(log, "Rebuilding database structure.");
@@ -896,7 +895,7 @@ int Slave::process_event(const slave::Basic_event_info& bei, RelayLogInfo& m_rli
 
         slave::Table_map_event_info tmi(bei.buf, bei.event_len);
 
-        const auto table_key = std::make_pair(tmi.m_dbnam, tmi.m_tblnam);
+        const TableKey table_key{tmi.m_dbnam, tmi.m_tblnam};
         if (m_table_order.find(table_key) == m_table_order.cend()) {
             LOG_TRACE(log, "Ignoring TABLE_MAP_EVENT for unreplicated table");
             break;
