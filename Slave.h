@@ -37,6 +37,7 @@
 #include "binlog_pos.h"
 #include "slave_log_event.h"
 #include "SlaveStats.h"
+#include "TableKey.h"
 
 
 namespace slave
@@ -47,14 +48,14 @@ class Slave
 {
 public:
 
-    typedef std::set<std::pair<std::string, std::string>> table_order_t;
-    typedef std::map<std::pair<std::string, std::string>, callback> callbacks_t;
-    typedef std::map<std::pair<std::string, std::string>, filter> filters_t;
-    typedef std::map<std::pair<std::string, std::string>, ddl_callback> ddl_callbacks_t;
+    typedef std::set<TableKey> table_order_t;
+    typedef std::map<TableKey, callback> callbacks_t;
+    typedef std::map<TableKey, filter> filters_t;
+    typedef std::map<TableKey, ddl_callback> ddl_callbacks_t;
 
     typedef std::vector<std::string> cols_t;
-    typedef std::map<std::pair<std::string, std::string>, cols_t> column_filters_t;
-    typedef std::map<std::pair<std::string, std::string>, RowType> row_types_t;
+    typedef std::map<TableKey, cols_t> column_filters_t;
+    typedef std::map<TableKey, RowType> row_types_t;
 
 private:
     static inline bool falseFunction() { return false; };
@@ -114,13 +115,13 @@ public:
                      const cols_t& column_filter, RowType row_type = RowType::Map, EventKind filter = eAll)
     {
         setCallback(_db_name, _tbl_name, _callback, row_type, filter);
-        m_column_filters[std::make_pair(_db_name, _tbl_name)] = column_filter;
+        m_column_filters[{_db_name, _tbl_name}] = column_filter;
     }
 
     void setCallback(const std::string& _db_name, const std::string& _tbl_name, callback _callback,
                      RowType row_type = RowType::Map, EventKind filter = eAll)
     {
-        const std::pair<std::string, std::string> key = std::make_pair(_db_name, _tbl_name);
+        const TableKey key{_db_name, _tbl_name};
         m_table_order.insert(key);
         m_callbacks[key] = _callback;
         m_filters[key] = filter;
@@ -132,8 +133,7 @@ public:
 
     void setDDLCallback(const std::string& _db_name, const std::string& _tbl_name, ddl_callback _callback)
     {
-        const auto key = std::make_pair(_db_name, _tbl_name);
-        m_ddl_callbacks[key] = _callback;
+        m_ddl_callbacks[{_db_name, _tbl_name}] = _callback;
     }
 
     void setXidCallback(xid_callback_t _callback)
