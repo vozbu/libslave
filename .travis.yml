@@ -1,11 +1,13 @@
 language: cpp
 
+dist: focal
+
 addons:
     apt:
         sources: &default_sources
             - boost-latest
         packages: &default_packages
-            - libboost1.55-all-dev
+            - libboost1.71-all-dev
 
 matrix:
   include:
@@ -29,9 +31,9 @@ matrix:
             - llvm-toolchain-trusty-5.0
           packages:
             - *default_packages
-            - clang-5.0
+            - clang-10
       env:
-        - MATRIX_EVAL="CC=clang-5.0 && CXX=clang++-5.0"
+        - MATRIX_EVAL="CC=clang-10 && CXX=clang++-10"
 
 before_install:
     - eval "${MATRIX_EVAL}"
@@ -39,7 +41,7 @@ before_install:
 before_script:
     - mkdir build
     - cd build
-    - cmake .. -DCMAKE_BUILD_TYPE=Release
+    - cmake -DCMAKE_BUILD_TYPE=Release .. 
 
 script:
     - make
