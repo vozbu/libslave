@@ -362,6 +362,13 @@ bool check_log_event(const char* buf, uint event_len, Basic_event_info& bei, Eve
     case TRANSACTION_CONTEXT_EVENT:
     case VIEW_CHANGE_EVENT:
     case XA_PREPARE_LOG_EVENT:
+        if (bei.type != HEARTBEAT_LOG_EVENT)
+        {
+            LOG_TRACE( log, "Unsupported event code: " << (int) bei.type
+                << " when=" << bei.when
+                << " server_id=" << bei.server_id
+                << " log_pos=" << bei.log_pos);
+        }
         if (event_stat)
             event_stat->tickOther();
         return false;

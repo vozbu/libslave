@@ -424,6 +424,103 @@ struct raii_mysql_connector
         mysql_close(mysql);
     }
 };
+
+// This is a very dumb optimization, but it saves a lot of logging:
+// just skip HEARTBEAT (hb) events, since there are tons of them when connecting in GTID mode.
+// Have a look: https://scalegrid.io/blog/slow-mysql-start-time-in-gtid-binary-log-file-size-may-be-the-issue/
+class EventLoggerWithHBSkip
+{
+public:
+    void add_hb_event(uint event_size)
+    {
+        auto now = ::time(nullptr);
+        if (!skipping_hb_now())
+        {
+            LOG_TRACE(log, "Skipping HEARTBEAT events...");
+            prev_dump_ts = now;
+        }
+        ++total_hb_count;
+        total_hb_size += event_size;
+        if (DUMP_PERIOD <= now - prev_dump_ts)
+        {
+            do_dump_skipped_events();
+            prev_dump_ts = now;
+        }
+    }
+
+    void log_start_reading()
+    {
+        if (!skipping_hb_now())
+        {
+            do_log_start_reading();
+        }
+        else
+        {
+            current_event_len = 0;
+            current_event_packet_number = 0;
+        }
+    }
+
+    void log_event_len_and_packet_number(unsigned long len, int packet_number)
+    {
+        if (!skipping_hb_now())
+        {
+            do_log_event_len_and_packet_number(len, packet_number);
+        }
+        else
+        {
+            current_event_len = len;
+            current_event_packet_number = packet_number;
+        }
+    }
+
+    void flush_hb()
+    {
+        if (!skipping_hb_now())
+            return;
+
+        do_dump_skipped_events();
+        total_hb_count = 0;
+        total_hb_size = 0;
+        prev_dump_ts = 0;
+
+        if (0 != current_event_len)
+        {
+            do_log_start_reading();
+            do_log_event_len_and_packet_number(current_event_len, current_event_packet_number);
+        }
+        current_event_len = 0;
+        current_event_packet_number = 0;
+    }
+
+private:
+    static const int DUMP_PERIOD = 1;  // sec.
+
+    uint total_hb_count = 0;
+    uint total_hb_size = 0;
+    unsigned long current_event_len = 0;
+    int current_event_packet_number = 0;
+    time_t prev_dump_ts = 0;
+
+    bool skipping_hb_now() const { return 0 != total_hb_count; }
+
+    static void do_log_start_reading()
+    {
+        LOG_TRACE(log, "-- reading event --");
+    }
+
+    static void do_log_event_len_and_packet_number(unsigned long len, int packet_number)
+    {
+        LOG_TRACE(log, "Got event with length: " << len << " Packet number: " << packet_number);
+    }
+
+    void do_dump_skipped_events()
+    {
+        LOG_TRACE(log, "Skipped " << total_hb_count << " HEARTBEAT events; "
+            << "total size: " << total_hb_size << " bytes.");
+    }
+};
+
 }// anonymous-namespace
 
 
@@ -432,7 +529,7 @@ void Slave::get_remote_binlog(const std::function<bool()>& _interruptFlag)
     // SIGURG is used to unblock read operation on shutdown
     // the default handler for this signal is ignore
     sigUnblock(SIGURG);
-    int count_packet = 0;
+    int packet_number = 0;
 
     generateSlaveId();
 
@@ -465,22 +562,26 @@ connected:
     request_dump(m_master_info.position, &mysql);
     gtid_t gtid_next;
 
+    EventLoggerWithHBSkip ev_logger_hb_skip;
+
     while (!_interruptFlag()) {
 
         try {
 
-            LOG_TRACE(log, "-- reading event --");
+            ev_logger_hb_skip.log_start_reading();
 
             unsigned long len = read_event(&mysql);
 
             ext_state.setStateProcessing(true);
 
-            count_packet++;
-            LOG_TRACE(log, "Got event with length: " << len << " Packet number: " << count_packet );
+            packet_number++;
+            ev_logger_hb_skip.log_event_len_and_packet_number(len, packet_number);
 
             // end of data
 
             if (len == packet_error || len == packet_end_data) {
+
+                ev_logger_hb_skip.flush_hb();
 
                 uint mysql_error_number = mysql_errno(&mysql);
 
@@ -522,11 +623,15 @@ connected:
             uint event_len = len - 1;
             slave::Basic_event_info event(buf, event_len);
 
-            if (!slave::check_log_event(buf, event_len, event,
-                                        event_stat, masterGe56(), m_master_info)) {
-                LOG_TRACE(log, "Skipping unknown event.");
-                continue;
+            if (event.type == HEARTBEAT_LOG_EVENT) {
+                ev_logger_hb_skip.add_hb_event(event_len);
             }
+            else {
+                ev_logger_hb_skip.flush_hb();
+            }
+
+            if (!slave::check_log_event(buf, event_len, event, event_stat, masterGe56(), m_master_info))
+                continue;
 
             //
 
