@@ -120,16 +120,11 @@ void Slave::init()
     check_master_binlog_format();
     check_master_gtid_mode();
 
+    check_slave_gtid_mode();
+
     ext_state.loadMasterPosition(m_master_info.position);
 
     LOG_TRACE(log, "Libslave initialized OK");
-}
-
-void Slave::enableGtid(bool on)
-{
-    if (on && !m_master_info.gtid_mode)
-        throw std::runtime_error("Trying to enable gtid on libslave while gtid_mode is disabled on master");
-    m_gtid_enabled = on;
 }
 
 void Slave::close_connection()
@@ -429,6 +424,103 @@ struct raii_mysql_connector
         mysql_close(mysql);
     }
 };
+
+// This is a very dumb optimization, but it saves a lot of logging:
+// just skip HEARTBEAT (hb) events, since there are tons of them when connecting in GTID mode.
+// Have a look: https://scalegrid.io/blog/slow-mysql-start-time-in-gtid-binary-log-file-size-may-be-the-issue/
+class EventLoggerWithHBSkip
+{
+public:
+    void add_hb_event(uint event_size)
+    {
+        auto now = ::time(nullptr);
+        if (!skipping_hb_now())
+        {
+            LOG_TRACE(log, "Skipping HEARTBEAT events...");
+            prev_dump_ts = now;
+        }
+        ++total_hb_count;
+        total_hb_size += event_size;
+        if (DUMP_PERIOD <= now - prev_dump_ts)
+        {
+            do_dump_skipped_events();
+            prev_dump_ts = now;
+        }
+    }
+
+    void log_start_reading()
+    {
+        if (!skipping_hb_now())
+        {
+            do_log_start_reading();
+        }
+        else
+        {
+            current_event_len = 0;
+            current_event_packet_number = 0;
+        }
+    }
+
+    void log_event_len_and_packet_number(unsigned long len, int packet_number)
+    {
+        if (!skipping_hb_now())
+        {
+            do_log_event_len_and_packet_number(len, packet_number);
+        }
+        else
+        {
+            current_event_len = len;
+            current_event_packet_number = packet_number;
+        }
+    }
+
+    void flush_hb()
+    {
+        if (!skipping_hb_now())
+            return;
+
+        do_dump_skipped_events();
+        total_hb_count = 0;
+        total_hb_size = 0;
+        prev_dump_ts = 0;
+
+        if (0 != current_event_len)
+        {
+            do_log_start_reading();
+            do_log_event_len_and_packet_number(current_event_len, current_event_packet_number);
+        }
+        current_event_len = 0;
+        current_event_packet_number = 0;
+    }
+
+private:
+    static const int DUMP_PERIOD = 1;  // sec.
+
+    uint total_hb_count = 0;
+    uint total_hb_size = 0;
+    unsigned long current_event_len = 0;
+    int current_event_packet_number = 0;
+    time_t prev_dump_ts = 0;
+
+    bool skipping_hb_now() const { return 0 != total_hb_count; }
+
+    static void do_log_start_reading()
+    {
+        LOG_TRACE(log, "-- reading event --");
+    }
+
+    static void do_log_event_len_and_packet_number(unsigned long len, int packet_number)
+    {
+        LOG_TRACE(log, "Got event with length: " << len << " Packet number: " << packet_number);
+    }
+
+    void do_dump_skipped_events()
+    {
+        LOG_TRACE(log, "Skipped " << total_hb_count << " HEARTBEAT events; "
+            << "total size: " << total_hb_size << " bytes.");
+    }
+};
+
 }// anonymous-namespace
 
 
@@ -437,7 +529,7 @@ void Slave::get_remote_binlog(const std::function<bool()>& _interruptFlag)
     // SIGURG is used to unblock read operation on shutdown
     // the default handler for this signal is ignore
     sigUnblock(SIGURG);
-    int count_packet = 0;
+    int packet_number = 0;
 
     generateSlaveId();
 
@@ -470,22 +562,26 @@ connected:
     request_dump(m_master_info.position, &mysql);
     gtid_t gtid_next;
 
+    EventLoggerWithHBSkip ev_logger_hb_skip;
+
     while (!_interruptFlag()) {
 
         try {
 
-            LOG_TRACE(log, "-- reading event --");
+            ev_logger_hb_skip.log_start_reading();
 
             unsigned long len = read_event(&mysql);
 
             ext_state.setStateProcessing(true);
 
-            count_packet++;
-            LOG_TRACE(log, "Got event with length: " << len << " Packet number: " << count_packet );
+            packet_number++;
+            ev_logger_hb_skip.log_event_len_and_packet_number(len, packet_number);
 
             // end of data
 
             if (len == packet_error || len == packet_end_data) {
+
+                ev_logger_hb_skip.flush_hb();
 
                 uint mysql_error_number = mysql_errno(&mysql);
 
@@ -520,22 +616,22 @@ connected:
 
             // Ok event
 
-            if (len == packet_end_data) {
+            if (len == packet_end_data)
                 continue;
+
+            const char* buf = (const char*) mysql.net.read_pos + 1;
+            uint event_len = len - 1;
+            slave::Basic_event_info event(buf, event_len);
+
+            if (event.type == HEARTBEAT_LOG_EVENT) {
+                ev_logger_hb_skip.add_hb_event(event_len);
+            }
+            else {
+                ev_logger_hb_skip.flush_hb();
             }
 
-            slave::Basic_event_info event;
-
-            if (!slave::read_log_event((const char*) mysql.net.read_pos + 1,
-                                       len - 1,
-                                       event,
-                                       event_stat,
-                                       masterGe56(),
-                                       m_master_info)) {
-
-                LOG_TRACE(log, "Skipping unknown event.");
+            if (!slave::check_log_event(buf, event_len, event, event_stat, masterGe56(), m_master_info))
                 continue;
-            }
 
             //
 
@@ -554,7 +650,7 @@ connected:
 
             if (event.type == XID_EVENT) {
 
-                if (!gtid_next.first.empty())
+                if (m_gtid_enabled && !gtid_next.first.empty())
                     m_master_info.position.addGtid(gtid_next);
                 ext_state.setMasterPosition(m_master_info.position);
 
@@ -572,7 +668,12 @@ connected:
                  * pos - position of the starting event
                  */
 
-                LOG_INFO(log, "Got rotate event.");
+                LOG_INFO(log, "Got rotate event."
+                    << " when=" << event.when
+                    << " server_id=" << event.server_id
+                    << " log_pos=" << event.log_pos
+                    << " pos=" << rei.pos
+                    << " new_ident=" << rei.new_log_ident);
 
                 /* WTF
                  */
@@ -592,16 +693,23 @@ connected:
             }
             else if (event.type == GTID_LOG_EVENT)
             {
-                LOG_TRACE(log, "Got GTID event.");
-                if (!gtid_next.first.empty())
+                if (!m_gtid_enabled)
                 {
-                    m_master_info.position.addGtid(gtid_next);
-                    ext_state.setMasterPosition(m_master_info.position);
+                    LOG_TRACE(log, "Got GTID event. Ignore, GTID is disabled on slave");
                 }
-                Gtid_event_info gei(event.buf, event.event_len);
-                LOG_TRACE(log, "GTID_NEXT: sid = " << gei.m_sid << ", gno =  " << gei.m_gno);
-                gtid_next.first = gei.m_sid;
-                gtid_next.second = gei.m_gno;
+                else
+                {
+                    LOG_TRACE(log, "Got GTID event.");
+                    if (!gtid_next.first.empty())
+                    {
+                        m_master_info.position.addGtid(gtid_next);
+                        ext_state.setMasterPosition(m_master_info.position);
+                    }
+                    Gtid_event_info gei(event.buf, event.event_len);
+                    LOG_TRACE(log, "GTID_NEXT: sid = " << gei.m_sid << ", gno =  " << gei.m_gno);
+                    gtid_next.first = gei.m_sid;
+                    gtid_next.second = gei.m_gno;
+                }
             }
 
             if (process_event(event, m_rli))
@@ -750,6 +858,14 @@ void Slave::check_master_gtid_mode()
 
         m_master_info.gtid_mode = (it->second.data == "ON");
     }
+    LOG_INFO(log, "master gtid_mode=" << m_master_info.gtid_mode);
+}
+
+void Slave::check_slave_gtid_mode()
+{
+    if (m_gtid_enabled && !m_master_info.gtid_mode)
+        throw std::runtime_error("Trying to enable gtid on libslave while gtid_mode is disabled on master");
+    LOG_INFO(log, "mysql_slave_gtid_enabled=" << m_gtid_enabled);
 }
 
 void Slave::do_checksum_handshake(MYSQL* mysql)
@@ -1011,7 +1127,8 @@ void Slave::request_dump(const Position& pos, MYSQL* mysql)
         size_t encoded_size = m_master_info.position.encodedGtidSize();
         uchar* buf = (uchar*)malloc(encoded_size + 22);
 
-        int2store(buf, 4);
+        // https://dev.mysql.com/doc/internals/en/com-binlog-dump-gtid.html
+        int2store(buf, 4);  // 4 - BINLOG_THROUGH_GTID
         int4store(buf + 2, m_server_id);
         int4store(buf + 6, 0);
         int8store(buf + 10, 4LL);
@@ -1128,9 +1245,12 @@ Position Slave::getLastBinlogPos() const
 
         result.log_pos = std::strtoul(z->second.data.c_str(), nullptr, 10);
 
-        z = res[0].find("Executed_Gtid_Set");
-        if (z != res[0].end())
-            result.parseGtid(z->second.data);
+        if (m_gtid_enabled)
+        {
+            z = res[0].find("Executed_Gtid_Set");
+            if (z != res[0].end())
+                result.parseGtid(z->second.data);
+        }
 
         return result;
     }

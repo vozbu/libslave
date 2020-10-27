@@ -63,11 +63,14 @@ namespace slave {
 
 //---------------------------------------------------------------------------------------
 
-void Basic_event_info::parse(const char* _buf, unsigned int _event_len) {
-
-    buf = _buf;
-    event_len = _event_len;
-
+Basic_event_info::Basic_event_info(const char* _buf, unsigned int _event_len)
+: type(UNKNOWN_EVENT)
+, log_pos(0)
+, when(0)
+, server_id(0)
+, buf(_buf)
+, event_len(_event_len)
+{
     if (event_len < LOG_POS_OFFSET + 4) {
         LOG_ERROR(log, "Sanity check failed: " << event_len << " " << LOG_POS_OFFSET + 4);
         throw std::runtime_error("Basic_event_info::parse failed");
@@ -253,13 +256,8 @@ inline uint32_t checksum_crc32(uint32_t crc, const unsigned char* pos, size_t le
 }
 
 
-bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, EventStatIface* event_stat, bool master_ge_56, MasterInfo& master_info)
-
+bool check_log_event(const char* buf, uint event_len, Basic_event_info& bei, EventStatIface* event_stat, bool master_ge_56, MasterInfo& master_info)
 {
-
-    bei.parse(buf, event_len);
-
-
     /* Check the integrity */
 
     if (event_len < EVENT_LEN_OFFSET ||
@@ -267,7 +265,7 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
         (uint) event_len != uint4korr(buf+EVENT_LEN_OFFSET))
     {
         LOG_ERROR(log, "Sanity check failed: " << event_len);
-        throw std::runtime_error("slave::read_log_event failed");
+        throw std::runtime_error("slave::check_log_event failed");
     }
 
     if (master_ge_56 && bei.type == FORMAT_DESCRIPTION_EVENT)
@@ -289,7 +287,7 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
         if (incoming != computed)
         {
             LOG_ERROR(log, "CRC32 check failed: incoming (" << incoming << ") != computed (" << computed << ")");
-            throw std::runtime_error("slave::read_log_event failed");
+            throw std::runtime_error("slave::check_log_event failed");
         }
         bei.event_len -= BINLOG_CHECKSUM_LEN;
     }
@@ -364,6 +362,13 @@ bool read_log_event(const char* buf, uint event_len, Basic_event_info& bei, Even
     case TRANSACTION_CONTEXT_EVENT:
     case VIEW_CHANGE_EVENT:
     case XA_PREPARE_LOG_EVENT:
+        if (bei.type != HEARTBEAT_LOG_EVENT)
+        {
+            LOG_TRACE( log, "Unsupported event code: " << (int) bei.type
+                << " when=" << bei.when
+                << " server_id=" << bei.server_id
+                << " log_pos=" << bei.log_pos);
+        }
         if (event_stat)
             event_stat->tickOther();
         return false;

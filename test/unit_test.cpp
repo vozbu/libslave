@@ -34,12 +34,14 @@ namespace // anonymous
         std::string mysql_db;
         std::string mysql_user;
         std::string mysql_pass;
+        bool mysql_slave_gtid_enabled;
 
         config()
         :   mysql_host("localhost")
         ,   mysql_port(3306)
         ,   mysql_db("test")
         ,   mysql_user("root")
+        ,   mysql_slave_gtid_enabled(false)
         {}
 
         void load(const std::string& fn)
@@ -70,6 +72,8 @@ namespace // anonymous
                     mysql_user = tokens.back();
                 else if (tokens.front() == "mysql_pass")
                     mysql_pass = tokens.back();
+                else if (tokens.front() == "mysql_slave_gtid_enabled")
+                    mysql_slave_gtid_enabled = tokens.back() == "true" || tokens.back() == "on";
                 else
                     throw std::runtime_error("unknown option '" + tokens.front() + "' in config file '" + fn + "'");
             }
@@ -324,6 +328,17 @@ namespace // anonymous
         Callback m_Callback;
         slave::EventKind m_Filter;
 
+        int getReasonableTimeoutSec()
+        {
+            if (cfg.mysql_slave_gtid_enabled)
+            {
+                // there is a feature of MySQL when run in GTID mode - slave is slow to start:
+                // https://jira.mail.ru/browse/TRG-57571?focusedCommentId=10070384#comment-10070384
+                return 35;
+            }
+            return 2;
+        }
+
         void startSlave()
         {
             m_StopFlag.m_StopFlag = false;
@@ -338,16 +353,17 @@ namespace // anonymous
                 mysql_thread_end();
             });
 
-            // Wait libslave to run - no more than 1000 times with 1 ms.
-            const timespec ts = {0 , 1000000};
-            size_t i = 0;
-            for (; i < 1000; ++i)
+            // Wait for libslave to run - no more than `timeoutMs` times 1 ms each.
+            const timespec ts = {0, 1000000};  // 1 ms.
+            int i = 0;
+            int timeoutMs = 1000;
+            for (; i < timeoutMs; ++i)
             {
                 ::nanosleep(&ts, NULL);
                 if (m_StopFlag.m_SlaveStarted)
                     break;
             }
-            if (1000 == i)
+            if (timeoutMs == i)
                 BOOST_FAIL ("Can't connect to mysql via libslave in 1 second");
         }
 
@@ -361,6 +377,7 @@ namespace // anonymous
             sMasterInfo.conn_options.mysql_user = cfg.mysql_user;
             sMasterInfo.conn_options.mysql_pass = cfg.mysql_pass;
             sMasterInfo.conn_options.mysql_db = cfg.mysql_db;
+            sMasterInfo.conn_options.mysql_slave_gtid_enabled = cfg.mysql_slave_gtid_enabled;
 
             conn.reset(new nanomysql::Connection(sMasterInfo.conn_options));
             conn->query("set names utf8");
@@ -523,20 +540,27 @@ namespace // anonymous
         {
             slave::Position pos;
             conn->query("SHOW MASTER STATUS");
-            conn->use([&pos](const nanomysql::fields_t& row)
+            bool slave_gtid_on = cfg.mysql_slave_gtid_enabled;
+            conn->use([&pos, slave_gtid_on](const nanomysql::fields_t& row)
             {
                 pos.log_name = row.at("File").data;
                 pos.log_pos = std::stoul(row.at("Position").data);
-                auto it = row.find("Executed_Gtid_Set");
-                if (it != row.end())
-                    pos.parseGtid(it->second.data);
+                if (slave_gtid_on)
+                {
+                    auto it = row.find("Executed_Gtid_Set");
+                    if (it != row.end())
+                        pos.parseGtid(it->second.data);
+                }
             });
 
             std::unique_lock<std::mutex> lock(m_ExtState.m_Mutex);
-            if (!m_ExtState.m_CondVariable.wait_for(lock, std::chrono::milliseconds(2000), [this, &pos]
+            int timeoutSec = getReasonableTimeoutSec();
+            if (!m_ExtState.m_CondVariable.wait_for(lock, std::chrono::seconds(timeoutSec), [this, &pos, slave_gtid_on]
             {
                 slave::Position posTmp;
                 m_ExtState.getMasterPosition(posTmp);
+                BOOST_CHECK_EQUAL(slave_gtid_on, !pos.gtid_executed.empty());
+                BOOST_CHECK_EQUAL(slave_gtid_on, !posTmp.gtid_executed.empty());
                 return posTmp.reachedOtherPos(pos);
             }))
                 BOOST_ERROR("Condition variable timed out");
@@ -806,10 +830,11 @@ namespace // anonymous
             mysql_thread_end();
         });
 
-        // Wait callback triggering no more than 1 second.
-        const timespec ts = {0 , 1000000};
-        size_t i = 0;
-        for (; i < 1000; ++i)
+        // Wait for libslave to run - no more than `timeoutMs` times 1 ms each.
+        const timespec ts = {0, 1000000};  // 1 ms.
+        int i = 0;
+        int timeoutMs = f.getReasonableTimeoutSec() * 1000;
+        for (; i < timeoutMs; ++i)
         {
             ::nanosleep(&ts, NULL);
             if (sCallback.counter >= 2)
@@ -1806,6 +1831,41 @@ namespace // anonymous
         BOOST_CHECK(ref2.front() == slave::gtid_interval_t(2, 2));
     }
 
+    void test_GtidReached()
+    {
+        slave::Position pos0;
+
+        slave::Position pos1;
+        const std::string uuid1Text = "24F7C945-C871-11E6-9461-0242AC110006";
+        pos1.parseGtid(uuid1Text + ":2-4");
+
+        BOOST_CHECK_EQUAL(false, pos0.reachedOtherPos(pos1));
+        BOOST_CHECK_EQUAL(true, pos1.reachedOtherPos(pos0));
+
+        slave::Position pos2;
+        pos2.parseGtid(uuid1Text + ":1-5");
+
+        BOOST_CHECK_EQUAL(false, pos1.reachedOtherPos(pos2));
+        BOOST_CHECK_EQUAL(true, pos1.reachedOtherPos(pos1));
+        BOOST_CHECK_EQUAL(true, pos2.reachedOtherPos(pos1));
+
+        slave::Position pos3;
+        const std::string uuid2Text = "CFC57182-F27D-45A9-9282-E730C2116C7F";
+        pos3.parseGtid(uuid1Text + ":2-4, " + uuid2Text + ":1-7");
+
+        BOOST_CHECK_EQUAL(false, pos1.reachedOtherPos(pos3));
+        BOOST_CHECK_EQUAL(true, pos3.reachedOtherPos(pos3));
+        BOOST_CHECK_EQUAL(true, pos3.reachedOtherPos(pos1));
+
+        BOOST_CHECK_EQUAL(false, pos2.reachedOtherPos(pos3));
+        BOOST_CHECK_EQUAL(false, pos3.reachedOtherPos(pos2));
+
+        slave::Position pos4;
+        pos4.parseGtid(uuid1Text + ":2-4");
+        pos4.gtid_executed.begin()->second.clear();
+        BOOST_REQUIRE_THROW(pos1.reachedOtherPos(pos4), std::runtime_error);
+    }
+
     void test_Decimal()
     {
         slave::decimal::Decimal d;
@@ -1938,6 +1998,7 @@ test_suite* init_unit_test_suite(int argc, char* argv[])
     ADD_FIXTURE_TEST(test_RenameTable);
     ADD_FIXTURE_TEST(test_GtidParsing);
     ADD_FIXTURE_TEST(test_GtidAdding);
+    ADD_FIXTURE_TEST(test_GtidReached);
     ADD_FIXTURE_TEST(test_Decimal);
     ADD_FIXTURE_TEST(test_DecimalIterators);
 
