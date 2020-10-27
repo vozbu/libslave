@@ -157,10 +157,7 @@ struct Basic_event_info {
     const char* buf;
     unsigned int event_len;
 
-    Basic_event_info() : type(UNKNOWN_EVENT), log_pos(0), when(0), server_id(0), buf(NULL), event_len(0)
-        {}
-
-    void parse(const char* b, unsigned int el);
+    Basic_event_info(const char* _buf, unsigned int _event_len);
 };
 
 struct Rotate_event_info {
@@ -215,7 +212,7 @@ struct Gtid_event_info
 };
 
 
-bool read_log_event(const char* buf, unsigned int event_len, Basic_event_info& info, EventStatIface* event_stat, bool master_ge_56, MasterInfo& master_info);
+bool check_log_event(const char* buf, unsigned int event_len, Basic_event_info& info, EventStatIface* event_stat, bool master_ge_56, MasterInfo& master_info);
 
 void apply_row_event(slave::RelayLogInfo& rli, const Basic_event_info& bei, const Row_event_info& roi, ExtStateIface &ext_state, EventStatIface* event_stat);
 

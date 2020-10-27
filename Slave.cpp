@@ -515,19 +515,15 @@ connected:
 
             // Ok event
 
-            if (len == packet_end_data) {
+            if (len == packet_end_data)
                 continue;
-            }
 
-            slave::Basic_event_info event;
+            const char* buf = (const char*) mysql.net.read_pos + 1;
+            uint event_len = len - 1;
+            slave::Basic_event_info event(buf, event_len);
 
-            if (!slave::read_log_event((const char*) mysql.net.read_pos + 1,
-                                       len - 1,
-                                       event,
-                                       event_stat,
-                                       masterGe56(),
-                                       m_master_info)) {
-
+            if (!slave::check_log_event(buf, event_len, event,
+                                        event_stat, masterGe56(), m_master_info)) {
                 LOG_TRACE(log, "Skipping unknown event.");
                 continue;
             }
