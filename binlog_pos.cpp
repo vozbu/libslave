@@ -252,10 +252,58 @@ void Position::encodeGtid(unsigned char* buf)
 
 bool Position::reachedOtherPos(const Position& other) const
 {
-    if (gtid_executed.empty())
+    if (gtid_executed.empty() && other.gtid_executed.empty())
         return log_name > other.log_name ||
                (log_name == other.log_name && log_pos >= other.log_pos);
-    return gtid_executed == other.gtid_executed;
+
+    // if one of the positions does not make use of GTID
+    // let's treat as one in the past
+    if (gtid_executed.empty())
+        return false;
+    if (other.gtid_executed.empty())
+        return true;
+
+    // now we are to compare `gtid_executed` lists:
+    // look through all of the other sources
+    // and check if we have all the transactions required
+    for (const auto& [sOtherSource, sOtherTransactions]: other.gtid_executed)
+    {
+        // if no transactions for the source - treat as an error
+        // https://dev.mysql.com/doc/refman/5.6/en/replication-gtids-concepts.html
+        if (sOtherTransactions.empty())
+        {
+            throw std::runtime_error(
+                "Invalid 'other' GTID: empty interval for UUID " + sOtherSource);
+        }
+
+        // since `gtid_executed` keeps track of all the sources, never forgetting them,
+        // this means if we see no such `other` source we should read on to see it appear
+        auto sCurIt = gtid_executed.find(sOtherSource);
+        if (gtid_executed.end() == sCurIt)
+            return false;
+        const auto& sThisTransactions = sCurIt->second;
+
+        // if no transactions for the source - treat as an error
+        // https://dev.mysql.com/doc/refman/5.6/en/replication-gtids-concepts.html
+        if (sThisTransactions.empty())
+        {
+            throw std::runtime_error(
+                "Invalid GTID: empty interval for UUID " + sOtherSource);  // the source was found
+        }
+
+        // if both sources found, then compare the last position of the transaction intervals
+        const auto& sThisLastInterval = sThisTransactions.back();
+        auto sThisLastTransaction = sThisLastInterval.second;
+        const auto& sOtherLastInterval = sOtherTransactions.back();
+        auto sOtherLastTransaction = sOtherLastInterval.second;
+        if (sThisLastTransaction < sOtherLastTransaction)
+            return false;
+    }
+
+    // we've checked all the sources, for each one:
+    // current transaction position >= position given,
+    // this means we are guaranteed to reach position given
+    return true;
 }
 
 std::string Position::str() const
