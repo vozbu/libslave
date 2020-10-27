@@ -752,13 +752,14 @@ void Slave::check_master_gtid_mode()
 
         m_master_info.gtid_mode = (it->second.data == "ON");
     }
+    LOG_INFO(log, "master gtid_mode=" << m_master_info.gtid_mode);
 }
 
 void Slave::check_slave_gtid_mode()
 {
-    if (m_master_info.conn_options.mysql_slave_gtid_enabled && !m_master_info.gtid_mode)
+    if (m_gtid_enabled && !m_master_info.gtid_mode)
         throw std::runtime_error("Trying to enable gtid on libslave while gtid_mode is disabled on master");
-    m_gtid_enabled = m_master_info.conn_options.mysql_slave_gtid_enabled;
+    LOG_INFO(log, "mysql_slave_gtid_enabled=" << m_gtid_enabled);
 }
 
 void Slave::do_checksum_handshake(MYSQL* mysql)
