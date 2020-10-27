@@ -167,47 +167,51 @@ void Position::parseGtid(const std::string& input)
 
 void Position::addGtid(const gtid_t& gtid)
 {
-    auto it = gtid_executed.find(gtid.first);
-    if (it == gtid_executed.end())
+    const auto& server_uuid = gtid.first;
+    auto trans_no = gtid.second;
+
+    auto& trans_intervals = gtid_executed[server_uuid];
+    bool add_new_interval = true;
+
+    for (auto it = trans_intervals.begin(); it != trans_intervals.end(); ++it)
     {
-        gtid_executed[gtid.first].emplace_back(gtid.second, gtid.second);
+        auto& interval = *it;
+        if (interval.second + 1 == trans_no)  // optimize for most frequent case
+        {
+            ++interval.second;
+            add_new_interval = false;
+            break;
+        }
+        if (trans_no >= interval.first && trans_no <= interval.second)
+        {
+            return;
+        }
+        if (trans_no + 1 == interval.first)
+        {
+            --interval.first;
+            add_new_interval = false;
+            break;
+        }
+        if (trans_no < interval.first)
+        {
+            trans_intervals.emplace(it, trans_no, trans_no);
+            return;
+        }
+    }
+
+    if (add_new_interval)
+    {
+        trans_intervals.emplace_back(trans_no, trans_no);
         return;
     }
 
-    bool flag = true;
-    for (auto itr = it->second.begin(); itr != it->second.end(); ++itr)
+    for (auto it = trans_intervals.begin(); it != trans_intervals.end(); ++it)
     {
-        if (gtid.second >= itr->first && gtid.second <= itr->second)
-            return;
-        if (gtid.second + 1 == itr->first)
+        auto next_it = std::next(it);
+        if (next_it != trans_intervals.end() && it->second + 1 == next_it->first)
         {
-            --itr->first;
-            flag = false;
-            break;
-        }
-        else if (gtid.second == itr->second + 1)
-        {
-            ++itr->second;
-            flag = false;
-            break;
-        }
-        else if (gtid.second < itr->first)
-        {
-            it->second.emplace(itr, gtid.second, gtid.second);
-            return;
-        }
-    }
-
-    if (flag)
-        it->second.emplace_back(gtid.second, gtid.second);
-
-    for (auto itr = it->second.begin(); itr != it->second.end(); ++itr)
-    {
-        auto next_itr = std::next(itr);
-        if (next_itr != it->second.end() && itr->second + 1 == next_itr->first)
-        {
-            itr->second = next_itr->second;
-            it->second.erase(next_itr);
+            it->second = next_it->second;
+            trans_intervals.erase(next_it);
             break;
         }
     }

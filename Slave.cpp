@@ -567,7 +567,12 @@ connected:
                  * pos - position of the starting event
                  */
 
-                LOG_INFO(log, "Got rotate event.");
+                LOG_INFO(log, "Got rotate event."
+                    << " when=" << event.when
+                    << " server_id=" << event.server_id
+                    << " log_pos=" << event.log_pos
+                    << " pos=" << rei.pos
+                    << " new_ident=" << rei.new_log_ident);
 
                 /* WTF
                  */
@@ -1021,7 +1026,8 @@ void Slave::request_dump(const Position& pos, MYSQL* mysql)
         size_t encoded_size = m_master_info.position.encodedGtidSize();
         uchar* buf = (uchar*)malloc(encoded_size + 22);
 
-        int2store(buf, 4);
+        // https://dev.mysql.com/doc/internals/en/com-binlog-dump-gtid.html
+        int2store(buf, 4);  // 4 - BINLOG_THROUGH_GTID
         int4store(buf + 2, m_server_id);
         int4store(buf + 6, 0);
         int8store(buf + 10, 4LL);
