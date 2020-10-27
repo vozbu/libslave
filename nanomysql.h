@@ -37,6 +37,7 @@ struct mysql_conn_opts
     unsigned int mysql_connect_timeout  = 10;
     unsigned int mysql_read_timeout     = 60 * 15;
     unsigned int mysql_write_timeout    = 60 * 15;
+    bool mysql_slave_gtid_enabled       = false;
 };
 
 class Connection {

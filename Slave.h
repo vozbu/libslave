@@ -92,8 +92,11 @@ public:
 
     Slave() : ext_state(empty_ext_state) {}
     Slave(ExtStateIface &state) : ext_state(state) {}
-    Slave(const MasterInfo& _master_info) : m_master_info(_master_info), ext_state(empty_ext_state) {}
-    Slave(const MasterInfo& _master_info, ExtStateIface &state) : m_master_info(_master_info), ext_state(state) {}
+    Slave(const MasterInfo& _master_info) : Slave(_master_info, empty_ext_state) {}
+    Slave(const MasterInfo& _master_info, ExtStateIface &state) : m_master_info(_master_info), ext_state(state)
+    {
+        ext_state.setMasterPosition(_master_info.position);
+    }
 
     void linkEventStat(EventStatIface* _event_stat)
     {
@@ -167,8 +170,6 @@ public:
     int masterVersion() const { return m_master_version; }
     bool masterGe56() const { return m_master_version >= 50600; }
 
-    void enableGtid(bool on = true);
-
     // Closes connection, opened in get_remotee_binlog. Should be called if your have get_remote_binlog
     // blocked on reading data from mysql server in the separate thread and you want to stop this thread.
     // You should take care that interruptFlag will return 'true' after connection is closed.
@@ -181,6 +182,8 @@ protected:
 
     void check_master_binlog_format();
     void check_master_gtid_mode();
+
+    void check_slave_gtid_mode();
 
     int process_event(const slave::Basic_event_info& bei, RelayLogInfo& rli);
 

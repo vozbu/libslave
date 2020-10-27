@@ -120,16 +120,11 @@ void Slave::init()
     check_master_binlog_format();
     check_master_gtid_mode();
 
+    check_slave_gtid_mode();
+
     ext_state.loadMasterPosition(m_master_info.position);
 
     LOG_TRACE(log, "Libslave initialized OK");
-}
-
-void Slave::enableGtid(bool on)
-{
-    if (on && !m_master_info.gtid_mode)
-        throw std::runtime_error("Trying to enable gtid on libslave while gtid_mode is disabled on master");
-    m_gtid_enabled = on;
 }
 
 void Slave::close_connection()
@@ -554,7 +549,7 @@ connected:
 
             if (event.type == XID_EVENT) {
 
-                if (!gtid_next.first.empty())
+                if (m_gtid_enabled && !gtid_next.first.empty())
                     m_master_info.position.addGtid(gtid_next);
                 ext_state.setMasterPosition(m_master_info.position);
 
@@ -592,16 +587,23 @@ connected:
             }
             else if (event.type == GTID_LOG_EVENT)
             {
-                LOG_TRACE(log, "Got GTID event.");
-                if (!gtid_next.first.empty())
+                if (!m_gtid_enabled)
                 {
-                    m_master_info.position.addGtid(gtid_next);
-                    ext_state.setMasterPosition(m_master_info.position);
+                    LOG_TRACE(log, "Got GTID event. Ignore, GTID is disabled on slave");
                 }
-                Gtid_event_info gei(event.buf, event.event_len);
-                LOG_TRACE(log, "GTID_NEXT: sid = " << gei.m_sid << ", gno =  " << gei.m_gno);
-                gtid_next.first = gei.m_sid;
-                gtid_next.second = gei.m_gno;
+                else
+                {
+                    LOG_TRACE(log, "Got GTID event.");
+                    if (!gtid_next.first.empty())
+                    {
+                        m_master_info.position.addGtid(gtid_next);
+                        ext_state.setMasterPosition(m_master_info.position);
+                    }
+                    Gtid_event_info gei(event.buf, event.event_len);
+                    LOG_TRACE(log, "GTID_NEXT: sid = " << gei.m_sid << ", gno =  " << gei.m_gno);
+                    gtid_next.first = gei.m_sid;
+                    gtid_next.second = gei.m_gno;
+                }
             }
 
             if (process_event(event, m_rli))
@@ -750,6 +752,13 @@ void Slave::check_master_gtid_mode()
 
         m_master_info.gtid_mode = (it->second.data == "ON");
     }
+}
+
+void Slave::check_slave_gtid_mode()
+{
+    if (m_master_info.conn_options.mysql_slave_gtid_enabled && !m_master_info.gtid_mode)
+        throw std::runtime_error("Trying to enable gtid on libslave while gtid_mode is disabled on master");
+    m_gtid_enabled = m_master_info.conn_options.mysql_slave_gtid_enabled;
 }
 
 void Slave::do_checksum_handshake(MYSQL* mysql)
@@ -1128,9 +1137,12 @@ Position Slave::getLastBinlogPos() const
 
         result.log_pos = std::strtoul(z->second.data.c_str(), nullptr, 10);
 
-        z = res[0].find("Executed_Gtid_Set");
-        if (z != res[0].end())
-            result.parseGtid(z->second.data);
+        if (m_gtid_enabled)
+        {
+            z = res[0].find("Executed_Gtid_Set");
+            if (z != res[0].end())
+                result.parseGtid(z->second.data);
+        }
 
         return result;
     }
